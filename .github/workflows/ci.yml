@@ -5,6 +5,8 @@ on:
     branches: [hishell-master]
   push:
     branches: [hishell-master]
+env:
+  HB_BIN: /storage/Users/currentUser/.harmonybrew/bin
 jobs:
   ci:
     runs-on: ubuntu-24.04-arm
@@ -15,8 +17,8 @@ jobs:
       run:
         shell: sh
     steps:
-      - run: echo "PATH=$PATH" && command -v node && node --version && pnpm --version && git --version
+      - run: export PATH="$HB_BIN:$PATH" && node --version && pnpm --version && git --version
       - uses: actions/checkout@v4
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run build
-      - run: pnpm run test
+      - run: export PATH="$HB_BIN:$PATH" && pnpm install --frozen-lockfile
+      - run: export PATH="$HB_BIN:$PATH" && pnpm run build
+      - run: export PATH="$HB_BIN:$PATH" && pnpm run test
