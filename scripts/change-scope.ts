@@ -115,6 +115,13 @@ function parseOptions(args: string[]): ChangeScopeOptions {
 
 function resolveCommit(root: string, label: 'base' | 'head', ref: string): string {
   const context = `cannot resolve ${label} ref ${JSON.stringify(ref)}`
+  // 歧义显式判定（跨 git 版本稳定）：git 2.45+ 的部分构建对 branch/tag 同名
+  // 不再输出 ambiguity warning（rev-parse 静默取 branch，实测本机 2.45.2），
+  // 改 for-each-ref 计数 heads/tags 同名（#58）。
+  const matches = executeGit(root, ['for-each-ref', '--format=%(refname)', `refs/heads/${ref}`, `refs/tags/${ref}`], context)
+  if (matches.status === 0 && matches.stdout.trim().split(/\r?\n/u).filter(Boolean).length > 1) {
+    throw new Error(`${label} ref ${JSON.stringify(ref)} is ambiguous; use a fully qualified ref or commit ID`)
+  }
   const result = executeGit(root, [
     '-c',
     'core.warnAmbiguousRefs=true',

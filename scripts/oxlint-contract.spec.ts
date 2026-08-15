@@ -9,7 +9,15 @@ import { describe, expect, it } from 'vitest'
 
 const repositoryRoot = fileURLToPath(new URL('..', import.meta.url))
 const oxlintCli = fileURLToPath(new URL('../node_modules/oxlint/bin/oxlint', import.meta.url))
-const tsxCli = fileURLToPath(new URL('../node_modules/tsx/dist/cli.mjs', import.meta.url))
+// tsx 的 CLI 入口会无条件创建 IPC 管道服务（watch 协议），hmdfs 不支持
+// AF_UNIX → listen EPERM。--import tsx/esm 的 register 路径无该管道，
+// 等价执行（#58）。
+const tsxRegisterArgs = ['--import', 'tsx/esm']
+// tsgolint 的平台二进制（@oxlint-tsgolint/<platform>-<arch>）无 openharmony
+// 供给（npmmirror 404、linux-arm64 为 glibc）——依赖其的用例窄排除（#58）。
+const tsgolintAvailable = process.platform !== ('openharmony' as string)
+// openharmony 上 tsgolint 链路（node→tsx→oxlint）显著慢，用例超时按平台放宽（#56）。
+const OXCT_TIMEOUT_MS = process.platform === ('openharmony' as string) ? 180_000 : 20_000
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -20,7 +28,7 @@ function isUnknownArray(value: unknown): value is unknown[] {
 }
 
 function runRepositoryOxlint(args: readonly string[], env: NodeJS.ProcessEnv = {}) {
-  return spawnSync(process.execPath, [tsxCli, 'scripts/run-oxlint.ts', ...args], {
+  return spawnSync(process.execPath, [...tsxRegisterArgs, 'scripts/run-oxlint.ts', ...args], {
     cwd: repositoryRoot,
     encoding: 'utf8',
     env: { ...process.env, NO_COLOR: '1', ...env },
@@ -46,7 +54,7 @@ async function writeContractConfig(suffix: string): Promise<string> {
 }
 
 describe('Oxlint executable contract', () => {
-  it('discovers the owning TypeScript project for every file class', async () => {
+  it.skipIf(!tsgolintAvailable)('discovers the owning TypeScript project for every file class', async () => {
     const suffix = randomUUID()
     const configPath = await writeContractConfig(suffix)
     const probes = [
@@ -105,9 +113,9 @@ probePromise()
         rm(configPath, { force: true }),
       ])
     }
-  }, 20_000)
+  }, OXCT_TIMEOUT_MS)
 
-  it('runs JavaScript compatibility and nursery rules', async () => {
+  it.skipIf(!tsgolintAvailable)('runs JavaScript compatibility and nursery rules', async () => {
     const suffix = randomUUID()
     const configPath = await writeContractConfig(suffix)
     const path = join(repositoryRoot, 'scripts', `oxlint-contract-${suffix}.ts`)
@@ -152,7 +160,7 @@ export const longProbe = 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 +
         rm(configPath, { force: true }),
       ])
     }
-  }, 20_000)
+  }, OXCT_TIMEOUT_MS)
 
   it('keeps the complete stylistic contract in Oxlint', async () => {
     const oxlintPath = join(repositoryRoot, '.oxlintrc.json')
@@ -227,7 +235,7 @@ export const longProbe = 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 +
     expect(lefthook).not.toContain('eslint.format.config.mjs')
   })
 
-  it('reports an unused suppression', async () => {
+  it.skipIf(!tsgolintAvailable)('reports an unused suppression', async () => {
     const suffix = randomUUID()
     const configPath = await writeContractConfig(suffix)
     const path = join(repositoryRoot, 'scripts', `oxlint-contract-${suffix}.ts`)
@@ -252,7 +260,7 @@ export const longProbe = 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 +
         rm(configPath, { force: true }),
       ])
     }
-  }, 20_000)
+  }, OXCT_TIMEOUT_MS)
 
   it('accepts an ignored-only staged selection', () => {
     const result = runOxlint([
@@ -371,6 +379,6 @@ export const longProbe = 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 +
         await rm(directory, { recursive: true, force: true })
       }
     },
-    20_000,
+    OXCT_TIMEOUT_MS,
   )
 })

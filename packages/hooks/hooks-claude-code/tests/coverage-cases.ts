@@ -55,7 +55,7 @@ function waitForIdle(_ctx: Context, agent: Agent): Promise<void> {
 function events(agent: Agent): SessionEvent[] { return [...agent.session.events] }
 /** Poll until `predicate` holds or the deadline passes — robust to detached
  * emit-listener hooks firing on a `.then` (a fixed sleep flakes under load). */
-async function waitFor(predicate: () => boolean, timeout = 5000, interval = 10): Promise<void> {
+async function waitFor(predicate: () => boolean, timeout = process.platform === ('openharmony' as string) ? 50_000 : 5000, interval = 10): Promise<void> {
   const deadline = Date.now() + timeout
   while (!predicate()) {
     if (Date.now() > deadline) throw new Error('waitFor: condition not met before deadline')

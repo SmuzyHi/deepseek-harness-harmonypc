@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 import {
   mkdirSync,
   mkdtempSync,
@@ -212,7 +212,19 @@ function startRequest(
   })
 }
 
-describe('real Claude Agent SDK 0.3.220 and its distributed Claude Code 2.1.220 fixture', {
+// The real-product suite self-skips where the distributed CLI fixture is
+// absent or cannot run (no platform package on this OS/arch, #57): probe the
+// bundled binary once, mirroring the pwsh availability pattern.
+const claudeCliUsable = (() => {
+  try {
+    execFileSync(claudeBin, ['--version'], { stdio: 'ignore', timeout: 15_000 })
+    return true
+  } catch {
+    return false
+  }
+})()
+
+describe.skipIf(!claudeCliUsable)('real Claude Agent SDK 0.3.220 and its distributed Claude Code 2.1.220 fixture', {
   timeout: 60_000,
 }, () => {
   it('inherits host settings and sends the exact task and fake key to local Messages', async () => {

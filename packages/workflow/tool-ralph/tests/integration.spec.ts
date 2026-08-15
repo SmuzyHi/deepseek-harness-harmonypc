@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -28,7 +30,7 @@ async function mountRalph(script: MockScript, config: toolRalph.Config) {
   ctx.llm.registerAdapter(['mock'], adapter)
   const parentHandle = await ctx.agents.create({
     sessionId: SessionId('ralph-parent'),
-    meta: { cwd: '/tmp/ralph-shared-workspace' },
+    meta: { cwd: join(tmpdir(), 'ralph-shared-workspace') },
     agentOptions: { provider: 'mock', model: 'mock' },
   })
   return { ctx, adapter, parentHandle, parent: parentHandle.agent }
@@ -66,7 +68,7 @@ describe('dsh-tool-ralph over the real spawn and worker-thread stack', () => {
 
     const parentHandle = await ctx.agents.create({
       sessionId: SessionId('ralph-parent'),
-      meta: { cwd: '/tmp/ralph-shared-workspace' },
+      meta: { cwd: join(tmpdir(), 'ralph-shared-workspace') },
       agentOptions: { provider: 'mock', model: 'mock' },
     })
     const parent = parentHandle.agent
@@ -96,7 +98,7 @@ describe('dsh-tool-ralph over the real spawn and worker-thread stack', () => {
     expect(children).toHaveLength(2)
     expect(new Set(children.map(child => child.id)).size).toBe(2)
     for (const child of children) {
-      expect(child.session.header.cwd).toBe('/tmp/ralph-shared-workspace')
+      expect(child.session.header.cwd).toBe(join(tmpdir(), 'ralph-shared-workspace'))
       expect(child.session.header.parentSession).toBe(parent.session.header.id)
       expect(child.session.header.seedLength).toBeUndefined()
       expect(ctx.agents.get(child.id)).toBeUndefined()

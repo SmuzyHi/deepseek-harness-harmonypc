@@ -473,7 +473,7 @@ async function markerLines(path: string): Promise<string[]> {
 }
 
 /** Poll an asynchronous condition until it succeeds or the test-local deadline expires. */
-async function waitFor(condition: () => Promise<boolean>, timeoutMs = 3000): Promise<void> {
+async function waitFor(condition: () => Promise<boolean>, timeoutMs = process.platform === ('openharmony' as string) ? 30_000 : 3000): Promise<void> {
   const started = Date.now()
   while (!await condition()) {
     if (Date.now() - started > timeoutMs) throw new Error('waitFor timed out')
