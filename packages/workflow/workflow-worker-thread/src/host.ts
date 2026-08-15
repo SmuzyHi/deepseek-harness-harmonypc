@@ -31,12 +31,15 @@ interface ChildRecord {
 
 /**
  * The scrubbed worker environment: no ambient credentials, no loader flags.
- * Windows derives `os.tmpdir()` from `TMP`/`TEMP` and falls back to the
- * literal relative path `undefined\temp` when the environment is empty, so
- * tsx's transform cache would land in a cwd-relative `undefined/temp`
- * directory; the host's real temp path (not a credential) is injected there.
- * The unbuilt shape additionally forwards `TSX_TSCONFIG_PATH` for path
- * resolution.
+ * Both arms still carry the host's real temp path and `PATH` (neither is a
+ * credential) so temp-dir caches and by-name subprocess spawning keep
+ * working inside the worker: Windows derives `os.tmpdir()` from `TMP`/`TEMP`
+ * and falls back to the literal relative path `undefined\temp` when the
+ * environment is empty, POSIX tooling (node, tsx) derives it from `TMPDIR`
+ * and falls back to `/tmp` — which is not writable on every POSIX platform
+ * (read-only mounts) — and esbuild's WASM service spawns `node` by name when
+ * the platform has no native binary, which fails without `PATH`. The unbuilt
+ * shape additionally forwards `TSX_TSCONFIG_PATH` for path resolution.
  * @param platform - host platform; overridable so tests exercise both peer arms.
  * @param tsconfigPath - the tsconfig pin to forward; only the unbuilt caller
  *   passes one, so the built worker never observes the host's pin.
@@ -47,10 +50,13 @@ export function workerSpawnEnv(
   tsconfigPath?: string,
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {}
+  env.PATH = process.env.PATH ?? ''
+  const tmp = tmpdir()
   if (platform === 'win32') {
-    const tmp = tmpdir()
     env.TMP = tmp
     env.TEMP = tmp
+  } else {
+    env.TMPDIR = tmp
   }
   if (tsconfigPath !== undefined) env.TSX_TSCONFIG_PATH = tsconfigPath
   return env

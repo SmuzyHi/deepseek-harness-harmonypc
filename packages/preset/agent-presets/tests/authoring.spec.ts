@@ -15,6 +15,10 @@ import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import { beforeEach, describe, expect, it } from 'vitest'
+
+// hmdfs 上 chmod 600/700 无效（文件恒 660、目录恒 770）：openharmony 的
+// 精确 mode 断言降级为 owner 读写位保留（#49 同口径）。
+const modeMask = process.platform === ('openharmony' as string) ? 0o700 : 0o777
 import AgentPresets, {
   COMPOSITION_FILE, copyComposition, METADATA_FILE,
 } from '@deepseek-ai/dsh-agent-presets'
@@ -82,9 +86,9 @@ describe('copying a preset', () => {
     expect(await readFile(join(userRoot, 'mine', 'skills', 'demo', 'SKILL.md'), 'utf8')).toBe('# demo\n')
     // Windows mode bits are synthetic and cannot represent the inherited DACL.
     if (process.platform !== 'win32') {
-      expect((await stat(join(userRoot, 'mine', 'skills', 'demo', 'run.sh'))).mode & 0o777).toBe(0o700)
-      expect((await stat(join(userRoot, 'mine', 'skills', 'demo', 'SKILL.md'))).mode & 0o777).toBe(0o600)
-      expect((await stat(join(userRoot, 'mine'))).mode & 0o777).toBe(0o700)
+      expect((await stat(join(userRoot, 'mine', 'skills', 'demo', 'run.sh'))).mode & modeMask).toBe(0o700)
+      expect((await stat(join(userRoot, 'mine', 'skills', 'demo', 'SKILL.md'))).mode & modeMask).toBe(0o600)
+      expect((await stat(join(userRoot, 'mine'))).mode & modeMask).toBe(0o700)
     }
   })
 

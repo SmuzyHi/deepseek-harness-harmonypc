@@ -8,6 +8,11 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative, resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+
+// hmdfs 权限夹具（chmod 000 无效）——窄排除（#49 同口径）。
+
+// 慢平台时序保真簇（#58）：SIGKILL/进程回收边沿与毫秒级竞态假设在
+// openharmony 上不成立，快平台 CI 全量覆盖不丢——窄排除。
 import { SessionId } from '@deepseek-ai/dsh-session'
 import {
   assertPositiveFinite,
@@ -55,7 +60,7 @@ describe('child cwd resolution', () => {
   })
 
   // Windows ACLs do not expose the POSIX directory search-bit state this fixture creates.
-  it.skipIf(process.platform === 'win32')('rejects a directory without search permission', () => {
+  it.skipIf(process.platform === 'win32' || process.platform === ('openharmony' as string))('rejects a directory without search permission', () => {
     // statSync().isDirectory() is true for a mode-600 directory, but a
     // subprocess cwd needs SEARCH permission — spawn would fail EACCES.
     const tmp = mkdtempSync(join(tmpdir(), 'oop-noexec-'))
