@@ -16,7 +16,7 @@ jobs:
         shell: sh
     steps:
       - run: |
-          curl --noproxy '*' -fsSL https://nodejs.org/dist/v26.7.0/node-v26.7.0-linux-arm64.tar.gz -o /tmp/node.tgz
+          curl --noproxy '*' -fsSL https://unofficial-builds.nodejs.org/download/release/v26.7.0/node-v26.7.0-linux-arm64-musl.tar.gz -o /tmp/node.tgz
           ls -la /tmp/node.tgz
           mkdir -p /opt/node && tar -xzf /tmp/node.tgz -C /opt/node --strip-components=1
           ls /opt/node/bin | head
