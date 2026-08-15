@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
+
+// hmdfs 上 chmod 0o500/0o000 无效（恒 660/770）：权限夹具状态无法构造
+// ——窄范围排除（#49 同口径）。
 import { Context } from '@deepseek-ai/cordis'
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -206,7 +209,7 @@ describe('sqlite backend specifics', () => {
     await closed
   })
 
-  it('propagates filesystem errors other than an existing database file', async () => {
+  it.skipIf(process.platform === ('openharmony' as string))('propagates filesystem errors other than an existing database file', async () => {
     if (process.platform === 'win32') return
     const dir = await mkdtemp(join(tmpdir(), 'dsh-storage-sqlite-'))
     dirs.push(dir)

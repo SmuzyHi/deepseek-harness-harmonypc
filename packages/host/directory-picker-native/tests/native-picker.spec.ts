@@ -21,6 +21,9 @@ const { execFileMock } = vi.hoisted(() => ({ execFileMock: vi.fn<ExecFileMock>()
 vi.mock('node:child_process', () => ({ execFile: execFileMock }))
 
 import { describe, expect, it, vi } from 'vitest'
+
+// 平台表不支持 openharmony（产品显式抛 unsupported）：能力缺失即跳过（#58）。
+const nativeCapable = process.platform !== ('openharmony' as string)
 import { pickNativeDirectory, type DirectoryPickerRunner } from '../src/native-picker.ts'
 
 function failure(code: string | number, stderr = ''): Error {
@@ -32,7 +35,7 @@ const signal = () => new AbortController().signal
 /** A Win32 dialog that always fails — the no-fallback case. */
 const noDialog = async (): Promise<string | null> => { throw new Error('dialog unavailable') }
 
-describe('native directory picker', () => {
+describe.skipIf(!nativeCapable)('native directory picker', () => {
   it('uses the macOS folder chooser and maps user cancellation to null', async () => {
     const run = vi.fn<DirectoryPickerRunner>(async () => ({ stdout: '/Users/test/project/\n', stderr: '' }))
     await expect(pickNativeDirectory(signal(), { platform: 'darwin', run })).resolves.toBe('/Users/test/project/')

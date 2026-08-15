@@ -2,6 +2,10 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { describe, expect, it } from 'vitest'
+
+// claude 平台负载（@anthropic-ai 平台包）在 openharmony 无供给（#57 同族），
+// 生成器无法重建 → 窄排除。
+const platformFixtureGap = process.platform === ('openharmony' as string)
 import {
   CLAUDE_AGENT_SDK_PACKAGE,
   claudeDistributionFromManifest,
@@ -24,7 +28,7 @@ describe('THIRD_PARTY_NOTICES.md', () => {
   // already runs in the test lane, so the check costs no extra CI process.
   // Pre-commit regenerates the file whenever a manifest is staged, so reaching
   // this assertion means the notices were committed without that hook.
-  it('matches what the generator produces from the current manifests', () => {
+  it.skipIf(platformFixtureGap)('matches what the generator produces from the current manifests', () => {
     const generated = render()
     expect(generated).toContain('It depends on the third-party software listed below.')
     expect(readFileSync(resolve(root, 'THIRD_PARTY_NOTICES.md'), 'utf8'), 'stale notices — run `pnpm run gen-third-party-notices`').toBe(generated)

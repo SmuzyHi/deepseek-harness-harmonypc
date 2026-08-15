@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 import {
   existsSync,
   mkdirSync,
@@ -140,7 +140,18 @@ function responseInputTexts(body: Record<string, unknown>): string[] {
   })
 }
 
-describe('real @openai/codex 0.147.0 product', () => {
+// The real-product suite self-skips where the @openai/codex app-server
+// cannot run on this platform (#57): probe the bundled entry once.
+const codexAppServerUsable = (() => {
+  try {
+    execFileSync(process.execPath, [codexEntry, '--version'], { stdio: 'ignore', timeout: 15_000 })
+    return true
+  } catch {
+    return false
+  }
+})()
+
+describe.skipIf(!codexAppServerUsable)('real @openai/codex 0.147.0 product', () => {
   it('passes the exact task and fake authentication to local Responses and returns exact text', async () => {
     const sentinel = 'REAL_CODEX_SENTINEL_0_147_0'
     const task = 'Return the fixture sentinel exactly.'

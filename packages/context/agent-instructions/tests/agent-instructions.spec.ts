@@ -2,6 +2,9 @@ import { chmod, mkdtemp, mkdir, rm, stat, symlink, utimes, writeFile } from 'nod
 import { dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { describe, expect, it, vi } from 'vitest'
+
+// hmdfs 上 chmod 0o000 无效（恒 660）：权限夹具状态无法构造——窄范围
+// 排除（#49 同口径，与 Windows 排除 POSIX-only 夹具一致）。
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import * as workspaceContext from '@deepseek-ai/dsh-agent-instructions'
@@ -429,7 +432,7 @@ describe('workspace context instruction discovery', () => {
   })
 
   // POSIX-only fixture: chmod 0 cannot make a file unreadable to its owner on Windows.
-  it.skipIf(process.platform === 'win32')('skips a file that becomes unreadable after discovery without failing the request', async () => {
+  it.skipIf(process.platform === 'win32' || process.platform === ('openharmony' as string))('skips a file that becomes unreadable after discovery without failing the request', async () => {
     const root = await tempRepo()
     const home = await tempRepo()
     try {

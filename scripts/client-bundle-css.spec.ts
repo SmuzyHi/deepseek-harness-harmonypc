@@ -6,6 +6,10 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+
+// lightningcss 无 openharmony 供给（npmmirror 404；linux-arm64-musl 在真机
+// dlopen SIGSEGV，与 Alpine 系同族 #64）——依赖其的用例窄排除（#58）。
+const lightningAvailable = process.platform !== ('openharmony' as string)
 import { clientBundle } from '../packages/client/tsdown.client.ts'
 
 interface CssPlugin {
@@ -27,7 +31,7 @@ function cssPlugin(): CssPlugin {
   return plugin
 }
 
-describe('client bundle CSS Modules', () => {
+describe.skipIf(!lightningAvailable)('client bundle CSS Modules', () => {
   it('registers the source stylesheet as a watch dependency', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-client-css-watch-'))
     try {
