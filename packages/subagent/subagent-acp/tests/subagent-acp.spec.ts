@@ -1,4 +1,15 @@
 import { describe, expect, it } from 'vitest'
+
+// 慢平台时序保真簇（#58）：SIGKILL/进程回收边沿与毫秒级竞态假设在
+// openharmony 上不成立，快平台 CI 全量覆盖不丢——窄排除。
+const slowPlatformTiming = process.platform === ('openharmony' as string)
+
+// openharmony 上 SIGKILL→exit 边沿慢（hmdfs 进程回收），测试宽限放大（#58，
+// 同 subagent-dsh-sdk/sdk-client 口径）。
+const GRACE = (v: number): number => process.platform === ('openharmony' as string) ? 5_000 : v
+
+// hmdfs 上 chmod 0o000 无效（恒 660）：权限夹具状态无法构造——窄范围
+// 排除（#49 同口径，与 Windows 排除 POSIX-only 夹具一致）。
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import { chmodSync, existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
@@ -303,7 +314,7 @@ describe('cwd resolution', () => {
   })
 
   // Windows ACLs do not expose the POSIX directory search-bit state this fixture creates.
-  it.skipIf(process.platform === 'win32')('rejects a config cwd directory without search permission at load', async () => {
+  it.skipIf(process.platform === 'win32' || process.platform === ('openharmony' as string))('rejects a config cwd directory without search permission at load', async () => {
     // statSync().isDirectory() is true for a mode-600 directory, but a
     // subprocess cwd needs SEARCH permission — spawn would fail EACCES.
     const tmp = mkdtempSync(join(tmpdir(), 'acp-noexec-'))
@@ -473,8 +484,8 @@ describe('dsh-subagent-acp', () => {
           MOCK_FLUSH_ON_EOF: flushed,
           MOCK_FLUSH_DELAY_MS: '20',
         },
-        disposeEofGraceMs: 1000,
-        disposeGraceMs: 100,
+        disposeEofGraceMs: GRACE(1000),
+        disposeGraceMs: GRACE(100),
         spawn: spawnSubprocess,
       })).rejects.toThrow('ACP child published without a session id')
       // Startup rejects only after its private child reaches quiescence. The
@@ -485,7 +496,7 @@ describe('dsh-subagent-acp', () => {
     }
   })
 
-  it('dispose escalates SIGTERM → SIGKILL for a child that traps SIGTERM (bounded quiescence)', async () => {
+  it.skipIf(slowPlatformTiming)('dispose escalates SIGTERM → SIGKILL for a child that traps SIGTERM (bounded quiescence)', async () => {
     // The child traps SIGTERM and keeps its event loop alive, so a graceful
     // term alone would hang dispose forever. With a short grace, dispose must
     // escalate to SIGKILL and return once the process is actually gone.
@@ -501,8 +512,8 @@ describe('dsh-subagent-acp', () => {
         // Short on BOTH tiers: the trap ignores EOF and SIGTERM, so dispose must
         // burn the EOF window, then the SIGTERM window, then SIGKILL — keep each
         // small so the whole ladder finishes well within the 4000ms bound.
-        disposeEofGraceMs: 150,
-        disposeGraceMs: 150,
+        disposeEofGraceMs: GRACE(150),
+        disposeGraceMs: GRACE(150),
         spawn: spawnSubprocess,
       }
       const run = await startAcpRun(request(), spec)
@@ -549,8 +560,8 @@ describe('dsh-subagent-acp', () => {
           MOCK_HANG: '1', MOCK_TEXT: 'x', MOCK_READY_FILE: ready,
           MOCK_FLUSH_ON_EOF: flushed, MOCK_FLUSH_DELAY_MS: '400',
         },
-        disposeEofGraceMs: 2000,
-        disposeGraceMs: 50,
+        disposeEofGraceMs: GRACE(2000),
+        disposeGraceMs: GRACE(50),
         spawn: spawnSubprocess,
       }
       const run = await startAcpRun(request(), spec)
@@ -685,7 +696,7 @@ describe('dsh-subagent-acp', () => {
     )).rejects.toThrow()
   })
 
-  it('plugin-config dispose graces reach the run (SIGKILL escalation through the provider)', async () => {
+  it.skipIf(slowPlatformTiming)('plugin-config dispose graces reach the run (SIGKILL escalation through the provider)', async () => {
     // Same trap scenario as the direct startAcpRun escalation test, but the
     // graces arrive via the PLUGIN CONFIG through the registered provider — so a
     // regression that stops threading config into AcpRunSpec (falling back to
@@ -702,8 +713,8 @@ describe('dsh-subagent-acp', () => {
         args: [mockServer],
         permission: 'reject',
         env: { MOCK_TRAP_SIGTERM: '1', MOCK_TEXT: 'x', MOCK_READY_FILE: ready },
-        disposeEofGraceMs: 150,
-        disposeGraceMs: 150,
+        disposeEofGraceMs: GRACE(150),
+        disposeGraceMs: GRACE(150),
       })
       const run = await ctx.subagents.start('acp', request())
       await waitForFile(ready)

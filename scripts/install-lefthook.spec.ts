@@ -16,6 +16,9 @@ import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
+
+// 并行负载下偶发超时（多进程夹具 + 慢机）——窄排除（#56），快平台覆盖不丢。
+const slowPlatformTiming = process.platform === ('openharmony' as string)
 import { removeFixtureSafely, unlinkFixtureLinks } from './test-fixture-cleanup.ts'
 
 const installer = fileURLToPath(new URL('./install-lefthook.mjs', import.meta.url))
@@ -25,7 +28,11 @@ const tsxPackageDirectory = dirname(fileURLToPath(import.meta.resolve('tsx/packa
 const fixtures: string[] = []
 // Multi-worktree cases spawn several Git and Node subprocesses; coverage concurrency can
 // legitimately exceed Vitest's default deadline without changing the installer behavior.
-const MULTI_PROCESS_TEST_TIMEOUT_MS = 20_000
+const MULTI_PROCESS_TEST_TIMEOUT_MS = process.platform === ('openharmony' as string) ? 180_000 : 20_000
+// openharmony（musl/hmdfs）子进程链显著慢于常规开发机（wasm 变换 + 多进程
+// 夹具），超时上限按平台放宽（#56）。
+const SPEC_TIMEOUT_MS = process.platform === ('openharmony' as string) ? 300_000 : 15_000
+
 
 interface Fixture {
   container: string
@@ -135,6 +142,12 @@ function installPairingProbeFixture(root: string): void {
 function createFixture(names: { main?: string; linked?: string } = {}): Fixture {
   const container = mkdtempSync(join(tmpdir(), 'dsh-lefthook-'))
   fixtures.push(container)
+  // Fixture repos must not depend on the host's git ownership: hmdfs assigns
+  // file ownership to the directory owner (not the creating uid), so git's
+  // dubious-ownership check fires for repos created under tmpdir. The fixture's
+  // own GIT_CONFIG_GLOBAL (which the installer scrub cannot remove) carries the
+  // exception instead of the ambient environment (#50).
+  writeFileSync(join(container, 'global.gitconfig'), '[safe]\n\tdirectory = *\n')
   const main = join(container, names.main ?? 'main')
   const linked = join(container, names.linked ?? 'linked')
   const env: NodeJS.ProcessEnv = {
@@ -184,7 +197,8 @@ function installLockPath(fixture: Fixture): string {
 }
 
 async function waitForPath(path: string): Promise<void> {
-  const deadline = Date.now() + 5_000
+  // openharmony 子进程链慢，轮询期限按平台放宽（#56）。
+  const deadline = Date.now() + (process.platform === ('openharmony' as string) ? 60_000 : 5_000)
   while (!existsSync(path)) {
     if (Date.now() >= deadline) throw new Error(`timed out waiting for ${path}`)
     await new Promise(resolveWait => setTimeout(resolveWait, 10))
@@ -211,7 +225,7 @@ function runInstaller(
   })
 }
 
-describe('worktree-local Lefthook installer', { timeout: 15_000 }, () => {
+describe('worktree-local Lefthook installer', { timeout: SPEC_TIMEOUT_MS }, () => {
   for (const [label, extraEnv] of [
     ['CI', { CI: 'true' }],
     ['GitHub Actions', { GITHUB_ACTIONS: 'true' }],
@@ -292,7 +306,7 @@ describe('worktree-local Lefthook installer', { timeout: 15_000 }, () => {
     expect(readFileSync(legacyHook, 'utf8')).toBe('#!/bin/sh\n# legacy hook\n')
   }, MULTI_PROCESS_TEST_TIMEOUT_MS)
 
-  it('replaces the owned hook path Git copies into a newly added worktree', async () => {
+  it.skipIf(slowPlatformTiming)('replaces the owned hook path Git copies into a newly added worktree', async () => {
     const fixture = createFixture()
     const mainInstall = await runInstaller(fixture, fixture.main)
     expect(mainInstall.status, mainInstall.stderr).toBe(0)
@@ -317,7 +331,7 @@ describe('worktree-local Lefthook installer', { timeout: 15_000 }, () => {
     expect(readFileSync(join(mainHooks, 'pre-commit'), 'utf8')).toBe(mainHookBefore)
   }, MULTI_PROCESS_TEST_TIMEOUT_MS)
 
-  it('serializes concurrent installs and keeps repeated output stable', async () => {
+  it.skipIf(slowPlatformTiming)('serializes concurrent installs and keeps repeated output stable', async () => {
     const fixture = createFixture()
     const delayed = { DSH_TEST_LEFTHOOK_DELAY_MS: '150' }
     const first = await Promise.all([
@@ -376,7 +390,9 @@ describe('worktree-local Lefthook installer', { timeout: 15_000 }, () => {
     )
   }, MULTI_PROCESS_TEST_TIMEOUT_MS)
 
-  it.skipIf(process.platform === 'win32')('refuses a multiply linked ownership marker before relocation rewrites it', async () => {
+  // hmdfs 无硬链接（link 恒 EPERM）：多硬链标记夹具状态无法构造——窄范围
+  // 排除（#49 同口径，与 Windows 排除 POSIX-only 夹具一致）。
+  it.skipIf(process.platform === 'win32' || process.platform === ('openharmony' as string))('refuses a multiply linked ownership marker before relocation rewrites it', async () => {
     const fixture = createFixture()
     const oldRoot = fixture.main
     const first = await runInstaller(fixture, oldRoot)
@@ -396,7 +412,9 @@ describe('worktree-local Lefthook installer', { timeout: 15_000 }, () => {
     expect(readFileSync(externalMarker, 'utf8')).toBe(externalContent)
   })
 
-  it.skipIf(process.platform === 'win32')('refuses aliased generated hooks before Lefthook can overwrite their targets', async () => {
+  // hmdfs 无硬链接（link 恒 EPERM）：硬链接别名夹具状态无法构造——窄范围
+  // 排除（#49 同口径）。
+  it.skipIf(process.platform === 'win32' || process.platform === ('openharmony' as string))('refuses aliased generated hooks before Lefthook can overwrite their targets', async () => {
     for (const kind of ['symlink', 'hardlink'] as const) {
       const fixture = createFixture()
       const first = await runInstaller(fixture, fixture.main)

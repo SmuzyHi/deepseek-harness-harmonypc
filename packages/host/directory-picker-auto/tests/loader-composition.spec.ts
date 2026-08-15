@@ -13,6 +13,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+
+// openharmony 无原生目录选择后端（平台表不支持）：该组合断言在快平台成立，
+// 本机窄排除（#58，产品降级为 auto/loopback 组合正确）。
+const nativeComposition = process.platform !== ('openharmony' as string)
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
@@ -158,7 +162,7 @@ describe('real Loader composition', () => {
   // The 60s budget covers this file's static imports (webserver plus both
   // backend node halves through tsx), which dominate on cold caches; the
   // Loader itself resolves nothing here — `loader.internal` is a module map.
-  it('mounts the native backend for an attended loopback host and unmounts it on disposal', { timeout: 60_000 }, async () => {
+  it.skipIf(!nativeComposition)('mounts the native backend for an attended loopback host and unmounts it on disposal', { timeout: 60_000 }, async () => {
     stubAttendedHost()
     const { ctx, configPath } = await loadComposition('127.0.0.1')
 
@@ -226,7 +230,7 @@ describe('real Loader composition', () => {
     expect(context!.get('directoryPicker')).toBeUndefined()
   })
 
-  it('tolerates the mounted entry being removed by the tree before the chooser unloads', { timeout: 60_000 }, async () => {
+  it.skipIf(!nativeComposition)('tolerates the mounted entry being removed by the tree before the chooser unloads', { timeout: 60_000 }, async () => {
     stubAttendedHost()
     const { ctx, configPath } = await loadComposition('127.0.0.1')
 
