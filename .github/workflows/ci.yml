@@ -5,21 +5,20 @@ on:
     branches: [hishell-master]
   push:
     branches: [hishell-master]
+env:
+  HB_BIN: /storage/Users/currentUser/.harmonybrew/bin
 jobs:
   ci:
     runs-on: ubuntu-24.04-arm
     container:
-      image: ghcr.io/smuzyhi/deepseek-harness-harmonypc:ci
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-    timeout-minutes: 60
+      image: swr.cn-north-4.myhuaweicloud.com/harmonybrew/ci-runner:latest
+    timeout-minutes: 90
     defaults:
       run:
         shell: sh
     steps:
-      - run: node --version && pnpm --version && git --version
+      - run: export PATH="$HB_BIN:$PATH" && brew install node && npm install -g pnpm@11.7.0 && node --version && pnpm --version && git --version
       - uses: actions/checkout@v4
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run build
-      - run: pnpm run test
+      - run: export PATH="$HB_BIN:$PATH" && pnpm install --frozen-lockfile
+      - run: export PATH="$HB_BIN:$PATH" && pnpm run build
+      - run: export PATH="$HB_BIN:$PATH" && pnpm run test
