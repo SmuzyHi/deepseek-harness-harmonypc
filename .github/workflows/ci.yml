@@ -5,20 +5,18 @@ on:
     branches: [hishell-master]
   push:
     branches: [hishell-master]
-env:
-  HB_BIN: /storage/Users/currentUser/.harmonybrew/bin
 jobs:
   ci:
     runs-on: ubuntu-24.04-arm
     container:
-      image: swr.cn-north-4.myhuaweicloud.com/harmonybrew/ci-runner:latest
+      image: ghcr.io/smuzyhi/dsh-harmonypc-ci:latest
     timeout-minutes: 60
     defaults:
       run:
         shell: sh
     steps:
-      - run: export PATH="$HB_BIN:$PATH" && node --version && npm install -g pnpm@11.7.0 && pnpm --version && git --version
+      - run: node --version && pnpm --version && git --version
       - uses: actions/checkout@v4
-      - run: export PATH="$HB_BIN:$PATH" && pnpm install --frozen-lockfile
-      - run: export PATH="$HB_BIN:$PATH" && pnpm run build
-      - run: export PATH="$HB_BIN:$PATH" && pnpm run test
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: pnpm run test
