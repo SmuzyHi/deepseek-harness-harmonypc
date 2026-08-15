@@ -1,0 +1,48 @@
+{
+  "name": "@deepseek-ai/dsh-bundle-hishell",
+  "description": "The dsh HiShell bundle: openharmony 部署的组合补丁层（fs-fence 沙箱/系统 rg/chmod 容忍/启动链旗标探测）+ 运行时胶水插件。非 openharmony 平台 no-op。",
+  "version": "0.1.0-rc.5",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/deepseek-ai/deepseek-harness.git",
+    "directory": "packages/bundle/hishell"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "cordis.patch.yml",
+    "lib/types/**/*.d.ts"
+  ],
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-invariants": "workspace:^"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-invariants": "workspace:^"
+  }
+}

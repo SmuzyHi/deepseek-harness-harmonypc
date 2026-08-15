@@ -1,0 +1,18 @@
+# dsh-bundle-hishell 补丁层：openharmony 部署的组合（设计骨架，2026-08-14）。
+# 应用位置：dsh-base 之后；各行按"openharmony 能力"门控（能力探测优先，
+# 见 .agents/notes/proposed/hishell/2026-08-14-hishell-plugin-architecture）。
+# 行内容随 PR-1/6/7/8 落地逐步填充；当前为占位注释，未引用任何不存在的行。
+
+# ── PR-8：沙箱后端选择（fs-fence）──────────────────────────────
+# - id: dsh-sandbox-local
+#   config:
+#     backendProbe: { preferKernel: true, fallback: fs-fence }   # 待 fs-fence runner 合入
+
+# ── PR-7：系统 rg（bundle 无需配置，tool-fs-search 已改为 PATH 解析）──
+
+# ── PR-6：凭证 chmod 语义（能力判定已在 credentials-local 内，无需 bundle 行）──
+
+# ── PR-2：web 启动链旗标探测 ───────────────────────────────────
+# - id: dsh-web-launcher
+#   config:
+#     exposeInternals: probe                                   # 待启动链探测实现
