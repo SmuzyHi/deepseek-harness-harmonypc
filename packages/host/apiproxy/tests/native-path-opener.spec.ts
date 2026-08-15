@@ -16,11 +16,14 @@ vi.mock('node:child_process', () => ({ execFile: execFileMock }))
 
 import { release as osRelease } from 'node:os'
 import { describe, expect, it, vi } from 'vitest'
+
+// 平台表不支持 openharmony（产品显式抛 unsupported）：能力缺失即跳过（#58）。
+const nativeCapable = process.platform !== ('openharmony' as string)
 import { canOpenNativePath, openNativePath, openNativeTextFile, type PathOpenerRunner } from '../src/native-path-opener.ts'
 
 const signal = () => new AbortController().signal
 
-describe('native path opener', () => {
+describe.skipIf(!nativeCapable)('native path opener', () => {
   it('opens with macOS open(1)', async () => {
     const run = vi.fn<PathOpenerRunner>(async () => ({ stdout: '', stderr: '' }))
     await openNativePath('/Users/test/file.txt', signal(), { platform: 'darwin', run })

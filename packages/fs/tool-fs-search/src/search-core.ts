@@ -1,7 +1,7 @@
 /**
  * Shared execution plumbing for the `glob` / `grep` search tools: the
  * package-owned `SEARCH_*` error vocabulary, one spawn helper that runs the
- * PACKAGED ripgrep binary (`@vscode/ripgrep`) with a plain argv vector and
+ * SYSTEM ripgrep binary (resolved from PATH) with a plain argv vector and
  * returns complete raw stdout, the best-effort formatted-result spill handoff,
  * and workdir-relative path display.
  *
@@ -19,7 +19,8 @@
  * @module @deepseek-ai/dsh-tool-fs-search/search-core
  */
 
-import { isAbsolute, relative, sep } from 'node:path'
+import { access, constants } from 'node:fs/promises'
+import { isAbsolute, join, relative, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import { ItemRetainer, TextRetainer } from '@deepseek-ai/dsh-output-retention'
@@ -153,28 +154,77 @@ function completeStdout(toolName: string, stdout: SubprocessOutputRead, rawOutpu
   )
 }
 
-let rgPathPromise: Promise<string> | undefined
-
 /**
- * The packaged ripgrep binary path, resolved lazily once per process.
- *
- * `@vscode/ripgrep` resolves its platform package (`@vscode/ripgrep-<platform>
- * -<arch>`) at module evaluation, so a static import would turn a missing or
- * corrupt platform package (`pnpm install --omit=optional`, partial install)
- * into a failure of the whole Loader composition. Resolving at the call
- * boundary keeps that failure at the first search call as `SEARCH_FAILED` —
- * the package's documented no-load-time-probe contract.
- *
- * @returns the packaged binary's absolute path; the memoized promise rejects
- *   when the platform package cannot be resolved.
+ * Where the ripgrep binary comes from. `auto` probes the system PATH first and
+ * falls back to the packaged binary — the packaged `@vscode/ripgrep` is an
+ * optional dependency (musl/openharmony has no usable platform package), so a
+ * Windows/macOS/Linux host without a system `rg` still works through it.
  */
-export function resolveRgPath(): Promise<string> {
-  rgPathPromise ??= import('@vscode/ripgrep').then(module => module.rgPath)
-  return rgPathPromise
+export type RgSource = 'system' | 'packaged' | 'auto'
+
+let packagedRgPath: string | undefined
+
+/** Resolve the packaged `@vscode/ripgrep` path once; `undefined` when missing or unusable. */
+async function resolvePackagedRg(): Promise<string | undefined> {
+  if (packagedRgPath !== undefined) return packagedRgPath
+  try {
+    const module = await import('@vscode/ripgrep')
+    packagedRgPath = module.rgPath
+    return packagedRgPath
+  } catch {
+    packagedRgPath = undefined
+    return undefined
+  }
+}
+
+/** Probe PATH for an executable `rg`; resolves the first usable candidate or `undefined`. */
+async function resolveSystemRg(): Promise<string | undefined> {
+  const name = process.platform === 'win32' ? 'rg.exe' : 'rg'
+  const pathEntries = (process.env.PATH ?? '').split(process.platform === 'win32' ? ';' : ':')
+  const probed: string[] = []
+  for (const entry of pathEntries) {
+    if (entry === '') continue
+    const candidate = join(entry, name)
+    probed.push(candidate)
+    try {
+      await access(candidate, constants.X_OK)
+      return candidate
+    } catch {
+      // not executable — try the next PATH entry
+    }
+  }
+  return undefined
+}
+
+const rgPathPromises = new Map<RgSource, Promise<string>>()
+
+export function resolveRgPath(source: RgSource = 'auto'): Promise<string> {
+  let promise = rgPathPromises.get(source)
+  if (promise === undefined) {
+    promise = (async (): Promise<string> => {
+      if (source === 'packaged') {
+        const packagedPath = await resolvePackagedRg()
+        if (packagedPath !== undefined) return packagedPath
+        throw new Error('no packaged ripgrep available (@vscode/ripgrep optional dependency missing or unusable)')
+      }
+      const systemPath = await resolveSystemRg()
+      if (source === 'system') {
+        if (systemPath !== undefined) return systemPath
+        throw new Error('no executable "rg" found on PATH (rgSource=system)')
+      }
+      // auto: system first, packaged fallback.
+      if (systemPath !== undefined) return systemPath
+      const packagedPath = await resolvePackagedRg()
+      if (packagedPath !== undefined) return packagedPath
+      throw new Error('no usable ripgrep: system PATH probe and packaged @vscode/ripgrep both unavailable')
+    })()
+    rgPathPromises.set(source, promise)
+  }
+  return promise
 }
 
 /**
- * Run the packaged ripgrep binary with a plain argv vector and return its
+ * Run the resolved ripgrep binary (system PATH first, packaged fallback) with a plain argv vector and return its
  * complete raw stdout. The working directory is the calling agent's session
  * cwd (`exec.agent.session.header.cwd`) when available, else
  * `process.cwd()`. `exec.signal` is forwarded so the cooperative tool timeout
@@ -194,7 +244,7 @@ export function resolveRgPath(): Promise<string> {
  * `SEARCH_INVALID_PATTERN`, the rest → `SEARCH_FAILED` /
  * `SEARCH_RAW_OUTPUT_OVERFLOW`). Both launch-time failure domains are
  * classified: a synchronous throw at spawn CREATION (a NUL in argv, an abort
- * racing the pre-check, a rejected `@vscode/ripgrep` resolution) and a
+ * racing the pre-check, a rejected `rg` resolution) and a
  * rejection of `handle.done` (the seam's infrastructure failures) both become
  * `SEARCH_FAILED` with the original as `cause` — an abort already observed by
  * creation time becomes `SEARCH_ABORTED` instead.
@@ -216,6 +266,7 @@ export async function runRipgrep(
   rawOutputMaxBytes: number,
   graceMs: number,
   stderrMaxBytes: number,
+  rgSource: RgSource = 'auto',
 ): Promise<RipgrepRun> {
   if (exec.signal.aborted) {
     throw new SearchError(`${toolName} was aborted before completion (tool timeout or caller cancellation)`, 'SEARCH_ABORTED')
@@ -225,7 +276,7 @@ export async function runRipgrep(
   let handle: SubprocessHandle
   try {
     handle = ctx.subprocess.spawn({
-      argv: [await resolveRgPath(), '--no-config', ...argv],
+      argv: [await resolveRgPath(rgSource), '--no-config', ...argv],
       cwd: workdir,
       stdio: {
         stdin: 'ignore',
