@@ -10,6 +10,9 @@ jobs:
     runs-on: ubuntu-24.04-arm
     container:
       image: ghcr.io/smuzyhi/deepseek-harness-harmonypc:ci
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     timeout-minutes: 60
     defaults:
       run:
