@@ -114,8 +114,16 @@ async function assertOwnerOnly(filename: string, logger?: { warn(message: string
   /* v8 ignore start -- Windows has no POSIX mode enforcement; POSIX behavior tests enforce this peer. */
   const offending = mode & GROUP_OTHER_BITS
   if (offending === 0) return
-  // hmdfs（HiShell）静默忽略权限位：chmod 600 后 stat 恒 660/770（PR-6）。
-  // 先尽力 chmod 并 re-stat 验证——收敛 = 修复成功；未收敛 = 文件系统不支持
+  // 平台门控（审计 A：跨平台回归护栏）：仅在 chmod 语义受限的文件系统
+  // （openharmony hmdfs，chmod 600 后 stat 恒 660/770，PR-6）尝试修复放行；
+  // 其他 POSIX 平台保持上游 fail-closed 语义（组/他人可读一律拒绝）。
+  if (process.platform !== ('openharmony' as string)) {
+    throw new Error(
+      `credentials-local: ${filename} is readable beyond its owner (mode ${(mode & 0o777).toString(8)});`
+      + ` run "chmod 600 ${filename}" before starting again`,
+    )
+  }
+  // hmdfs 上先尽力 chmod 并 re-stat 验证——收敛 = 修复成功；未收敛 = 文件系统不支持
   // owner-only 语义（group 位本就不是安全边界），按文件系统语义放行；
   // chmod 自身失败（只读文件系统等）则保持 fail-closed，按权限位报错。
   try {
