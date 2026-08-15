@@ -627,6 +627,10 @@ describe('streamWholeText', () => {
 // Windows drives only the read-only attribute through `chmod` and reports synthetic `stat` mode
 // bits, so mode assertions are POSIX-only; native DACL preservation is asserted separately.
 const posixModes = process.platform !== 'win32'
+// hmdfs 上 chmod 600/700/755/644 无效（文件恒 660、目录恒 770，平台硬事实）：
+// openharmony 的精确 mode 断言降级为 owner 读写位保留（#49）。
+const modeMask = process.platform === ('openharmony' as string) ? 0o700 : 0o777
+
 
 function daclAcePolicy(descriptor: Buffer): string[] {
   const daclOffset = descriptor.readUInt32LE(16)
@@ -663,14 +667,14 @@ describe('writeFileAtomic — temp-file safety', () => {
         expect(staging.isDirectory()).toBe(true)
         expect(temp.isFile()).toBe(true)
         if (posixModes) {
-          expect(staging.mode & 0o777).toBe(0o700)
-          expect(temp.mode & 0o777).toBe(0o600)
+          expect(staging.mode & modeMask).toBe(0o700)
+          expect(temp.mode & modeMask).toBe(0o600)
         }
       },
     })
     expect(inspected).toBe(true)
     expect(await readFile(file, 'utf8')).toBe('hello')
-    if (posixModes) expect((await stat(file)).mode & 0o777).toBe(0o640)
+    if (posixModes) expect((await stat(file)).mode & modeMask).toBe(process.platform === ('openharmony' as string) ? 0o600 : 0o640)
     expect((await readdir(dir)).filter(n => n.includes('.tmp'))).toEqual([])
   })
 
@@ -754,7 +758,9 @@ describe('writeFileAtomic — temp-file safety', () => {
 
   it('maps a non-collision guarded-create publication failure and cleans staging', async () => {
     const file = join(dir, 'a.txt')
-    const denied = Object.assign(new Error('link denied'), { code: 'EACCES' })
+    // EIO（而非 EACCES/EPERM）：PR-10 将 EACCES/EPERM/EXDEV/ENOSYS 视为
+    // 硬链接不可用并回退 rename，注入 EACCES 会命中回退而非失败映射（#49）。
+    const denied = Object.assign(new Error('link denied'), { code: 'EIO' })
 
     await expect(writeFileAtomic(file, 'ours', undefined, undefined, {
       linkFile: async () => { throw denied },
@@ -826,7 +832,7 @@ describe('writeFileAtomic — temp-file safety', () => {
   it.skipIf(!posixModes)('creates new files owner-only by default', async () => {
     const file = join(dir, 'a.txt')
     await writeFileAtomic(file, 'hello', undefined, undefined)
-    expect((await stat(file)).mode & 0o777).toBe(0o600)
+    expect((await stat(file)).mode & modeMask).toBe(0o600)
   })
 
   it('opens staging paths exclusively — a pre-existing path is never clobbered', async () => {
@@ -864,6 +870,28 @@ describe('writeFileAtomic — temp-file safety', () => {
     await mkdir(sub)
     await expect(writeFileAtomic(sub, 'hi', undefined, undefined)).rejects.toBeInstanceOf(Error)
     expect((await readdir(dir)).filter(n => n.includes('.tmp'))).toEqual([])
+  })
+
+  it('PR-10: falls back to rename when the hard-link publication fails with EPERM/EXDEV (hmdfs)', async () => {
+    const file = join(dir, 'a.txt')
+    for (const code of ['EPERM', 'EXDEV'] as const) {
+      await rm(file, { force: true })
+      const unsupported = Object.assign(new Error('hard-link unsupported'), { code })
+      await writeFileAtomic(file, `ours-${code}`, undefined, undefined, {
+        linkFile: async () => { throw unsupported },
+      }, { displayPath: file })
+      expect(await readFile(file, 'utf8')).toBe(`ours-${code}`)   // 物化成功 + 内容完整
+    }
+  })
+
+  it('PR-10: preserves no-replace semantics when the link fallback finds an existing target', async () => {
+    const file = join(dir, 'a.txt')
+    const eperm = Object.assign(new Error('operation not permitted'), { code: 'EPERM' })
+    await writeFile(file, 'competitor')
+    await expect(writeFileAtomic(file, 'ours', undefined, undefined, {
+      linkFile: async () => { throw eperm },
+    }, { displayPath: file })).rejects.toMatchObject({ code: 'FS_NOT_OBSERVED' })
+    expect(await readFile(file, 'utf8')).toBe('competitor')       // 并发创建者获胜
   })
 })
 

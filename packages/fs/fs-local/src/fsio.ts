@@ -46,6 +46,18 @@ function errorMessage(error: unknown): string {
 }
 /* v8 ignore stop */
 
+/**
+ * True when `error` reports a filesystem that does not support hard links
+ * (hmdfs on HiShell: `ln` is always EPERM; EACCES/EXDEV/ENOSYS are the
+ * portability set PR-1/PR-10 share). The caller falls back to `rename` for
+ * these codes and keeps fail-closed behavior for every other error.
+ */
+function isHardLinkUnsupported(error: unknown): boolean {
+  const code = (error as { code?: unknown }).code
+  return error instanceof Error && typeof code === 'string'
+    && ['EPERM', 'EACCES', 'EXDEV', 'ENOSYS'].includes(code)
+}
+
 function isPermissionError(error: unknown): boolean {
   return error instanceof Error && 'code' in error && (error.code === 'EACCES' || error.code === 'EPERM')
 }
@@ -579,7 +591,32 @@ export async function writeFileAtomic(
       try {
         await linkFile(tempPath, absolutePath)
       } catch (error: unknown) {
-        await throwGuardedCreateFailure(error, absolutePath, createIfAbsent.displayPath, inspectPublicationTarget)
+        if (!isHardLinkUnsupported(error)) {
+          await throwGuardedCreateFailure(error, absolutePath, createIfAbsent.displayPath, inspectPublicationTarget)
+        }
+        // hmdfs 无硬链接（hishell，PR-10）：link 恒 EPERM。回退同目录 rename，
+        // 原子性不变；排他创建退化为"先查后写"——目标已存在时仍经
+        // throwGuardedCreateFailure 报 FS_NOT_OBSERVED（并发创建者获胜）。
+        let existing: BigIntStats | undefined
+        try {
+          existing = await inspectPublicationTarget(absolutePath)
+        } catch (metadataError: unknown) {
+          if (isENOENT(metadataError) || isENOTDIR(metadataError)) {
+            try {
+              await rename(tempPath, absolutePath)
+            } catch (renameError: unknown) {
+              // 审计补充（PR-10 后续）：rename 回退仍失败时，把原 link 错误
+              // 作为 cause 链上——用户看到的是"link 不支持 + 回退也失败"的完整链路，
+              // 而不是只剩一个误导性的 rename 错误。
+              throw new FsError(`cannot write "${absolutePath}": hard-link unsupported and rename fallback failed (${errorMessage(renameError)})`, 'FS_IO_ERROR', { cause: error })
+            }
+          } else {
+            throw metadataError
+          }
+        }
+        if (existing !== undefined) {
+          await throwGuardedCreateFailure(error, absolutePath, createIfAbsent.displayPath, inspectPublicationTarget)
+        }
       }
     } else if (platform === 'win32' && mode !== undefined) {
       try {

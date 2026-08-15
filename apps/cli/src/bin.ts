@@ -28,6 +28,10 @@ const invocation = parseDshArgs(process.argv.slice(2), readVersion())
 
 switch (invocation.mode) {
   case 'profile': {
+    // PR-2（hishell）：vendored loader 需要 internal 模块加载器访问权（旗标或 addon），
+    // 不可用时启动早期明确报错，避免深层插件加载失败。
+    const { assertLoaderInternals } = await import('./loader-internals.ts')
+    assertLoaderInternals()
     const { runProfile } = await import('./profile-boot.ts')
     await runProfile({
       environment: loadLayeredEnv('dsh'),

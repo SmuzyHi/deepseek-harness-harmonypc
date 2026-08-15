@@ -106,6 +106,20 @@ describe('profile dialects', () => {
   })
 })
 
+describe('fsFenceSoPath config (regression guard for #79)', () => {
+  it('mounts with no fsFenceSoPath configured', async () => {
+    // schemastery fields are optional by default; a zod-style `.optional()`
+    // on this line crashes the static Config on every platform (#79).
+    const { sandbox } = await setup({})
+    expect(sandbox).toBeInstanceOf(LocalSandboxProvider)
+  })
+
+  it('accepts an explicit fsFenceSoPath', async () => {
+    const { sandbox } = await setup({ fsFenceSoPath: '/dev/null' })
+    expect(sandbox).toBeInstanceOf(LocalSandboxProvider)
+  })
+})
+
 describe('runnerCommand config', () => {
   it('a non-empty runnerCommand skips the chain: runner argv + bwrap-shaped profile + -- + caller argv, asserted full', async () => {
     const probeBwrap = vi.fn(() => false)

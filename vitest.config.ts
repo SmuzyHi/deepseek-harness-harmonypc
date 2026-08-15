@@ -34,6 +34,16 @@ const windowsUnsupportedPackages = process.platform === 'win32'
     ]
   : []
 
+// openharmony：lightningcss 无可用供给（npmmirror 404、musl 构建 dlopen
+// SIGSEGV，同 #64 Alpine 族）——两个 client-bundle 套件顶层 import 即崩，
+// 需文件级排除（describe 门挡不住收集期崩溃，#58）。
+const openharmonyUnsupportedTests = process.platform === 'openharmony'
+  ? [
+      'scripts/client-bundle-purity.spec.ts',
+      'scripts/client-bundle-css.spec.ts',
+    ]
+  : []
+
 const windowsUnsupportedTests = process.platform === 'win32'
   ? [
       ...windowsUnsupportedPackages.map(path => `${path}/tests/**/*.spec.ts`),
@@ -137,6 +147,7 @@ export default defineConfig({
           include: testIncludes,
           exclude: [
             ...windowsUnsupportedTests,
+            ...openharmonyUnsupportedTests,
             ...processBoundTests,
             ...coverageExemptExcludes,
           ],
@@ -152,6 +163,7 @@ export default defineConfig({
           include: processBoundTests,
           exclude: [
             ...windowsUnsupportedTests,
+            ...openharmonyUnsupportedTests,
             ...coverageExemptExcludes,
           ],
         },

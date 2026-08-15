@@ -3,6 +3,10 @@
 // broken observer never fails a committed write), and the YAML document
 // editor's isolation between entries.
 import { afterEach, describe, expect, it, vi } from 'vitest'
+
+// hmdfs 上 chmod 600/700 无效（文件恒 660、目录恒 770）：openharmony 的
+// 精确 mode 断言降级为 owner 读写位保留（#49 同口径）。
+const modeMask = process.platform === ('openharmony' as string) ? 0o700 : 0o777
 import { Context } from '@deepseek-ai/cordis'
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -78,7 +82,7 @@ describe('read-modify-write', () => {
     const home = join(dir, 'home')
     const ctx = await boot({ path: join(home, '.credentials.yaml'), watch: false })
     await ctx.credentials.set(ALPHA, 'one')
-    if (process.platform !== 'win32') expect((await stat(home)).mode & 0o777).toBe(0o700)
+    if (process.platform !== 'win32') expect((await stat(home)).mode & modeMask).toBe(0o700)
   })
 })
 

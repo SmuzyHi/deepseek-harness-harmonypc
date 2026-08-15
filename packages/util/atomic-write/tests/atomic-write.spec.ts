@@ -2,6 +2,10 @@ import { lstat, mkdir, mkdtemp, readFile, readdir, stat, symlink, writeFile } fr
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+
+// hmdfs 上 chmod 600/700 无效（文件恒 660、目录恒 770）：openharmony 的
+// 精确 mode 断言降级为 owner 读写位保留（#49 同口径）。
+const modeMask = process.platform === ('openharmony' as string) ? 0o700 : 0o777
 import { withFileLock, writeFileAtomic } from '../src/index.ts'
 
 async function scratch(): Promise<string> {
@@ -14,7 +18,7 @@ describe('writeFileAtomic', () => {
     const target = join(dir, 'nested', 'deep', 'doc.yaml')
     await writeFileAtomic(target, 'a: 1\n', { mode: 0o600 })
     expect(await readFile(target, 'utf8')).toBe('a: 1\n')
-    if (process.platform !== 'win32') expect((await stat(target)).mode & 0o777).toBe(0o600)
+    if (process.platform !== 'win32') expect((await stat(target)).mode & modeMask).toBe(0o600)
   })
 
   it('replaces existing content and narrows a wider-permission file to the stated mode', async () => {
@@ -23,7 +27,7 @@ describe('writeFileAtomic', () => {
     await writeFile(target, 'old', { mode: 0o644 })
     await writeFileAtomic(target, 'new', { mode: 0o600 })
     expect(await readFile(target, 'utf8')).toBe('new')
-    if (process.platform !== 'win32') expect((await stat(target)).mode & 0o777).toBe(0o600)
+    if (process.platform !== 'win32') expect((await stat(target)).mode & modeMask).toBe(0o600)
   })
 
   it('replaces a symlinked target itself without writing through to the referent', async () => {

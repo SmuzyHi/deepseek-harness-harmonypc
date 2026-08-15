@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+
+// hmdfs 不支持 FIFO（mkfifo EPERM）：FIFO 夹具用例窄排除（#49 同口径）。
 import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -137,7 +139,7 @@ describe('readHostSource', () => {
   })
 
   // Windows has no filesystem FIFO; the directory case above pins non-regular rejection there.
-  it.skipIf(process.platform === 'win32')('rejects a FIFO with no writer without blocking in open', async () => {
+  it.skipIf(process.platform === 'win32' || process.platform === ('openharmony' as string))('rejects a FIFO with no writer without blocking in open', async () => {
     const fifo = join(ws, 'pipe.ts')
     await execFileAsync('mkfifo', [fifo])
     using d = deadline(undefined, 1000, 'FIFO_READ_TIMEOUT')

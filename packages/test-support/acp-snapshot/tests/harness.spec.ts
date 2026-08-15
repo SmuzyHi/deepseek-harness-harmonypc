@@ -4,6 +4,10 @@ import { tmpdir } from 'node:os'
 import { delimiter, join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, describe, expect, it, vi } from 'vitest'
+
+// 慢平台时序保真簇（#58）：快失败 20ms 窗口与信号竞态假设在 openharmony
+// 不成立，快平台 CI 全量覆盖不丢——窄排除。
+const slowPlatformTiming = process.platform === ('openharmony' as string)
 import { PROTOCOL_VERSION } from '@agentclientprotocol/sdk'
 import { runScenario, snapshotSpillRoot, type AgentUnderTest, type InputStep } from '../src/harness.ts'
 import { launchAcpTestAgent } from '../src/launcher.ts'
@@ -218,7 +222,7 @@ describe('runScenario', () => {
     }
   })
 
-  it('preserves the child error when the requested signal publishes its exit marker later', async () => {
+  it.skipIf(slowPlatformTiming)('preserves the child error when the requested signal publishes its exit marker later', async () => {
     const { dir } = await scenario({})
     const launched = launchAcpTestAgent({ agent: AGENT, cwd: dir })
     await launched.spawned
@@ -684,7 +688,7 @@ describe('runScenario', () => {
     expect(result.sessionLogs[0]?.content).toContain('"turn":3')
   })
 
-  it('waitForTurnStart rejects missing, earlier, and malformed durable turns', { timeout: 20_000 }, async () => {
+  it.skipIf(slowPlatformTiming)('waitForTurnStart rejects missing, earlier, and malformed durable turns', { timeout: 20_000 }, async () => {
     const missing = await scenario({})
     await expect(runScenario(
       { steps: [...boot, { op: 'waitForTurnStart', timeoutMs: 20 }] },
@@ -761,7 +765,7 @@ describe('runScenario', () => {
     }
   })
 
-  it('waitForTurnEnd times out for a missing log and an open logged turn', { timeout: 20_000 }, async () => {
+  it.skipIf(slowPlatformTiming)('waitForTurnEnd times out for a missing log and an open logged turn', { timeout: 20_000 }, async () => {
     const missing = await scenario({})
     await expect(runScenario(
       { steps: [...boot, { op: 'waitForTurnEnd', timeoutMs: 20 }] },
@@ -823,7 +827,7 @@ describe('runScenario', () => {
     )).rejects.toThrow(/did not persist goal phase "blocked" within 20ms/)
   })
 
-  it('waitForSubagentTurnEnd requires a closed child work turn', { timeout: 20_000 }, async () => {
+  it.skipIf(slowPlatformTiming)('waitForSubagentTurnEnd requires a closed child work turn', { timeout: 20_000 }, async () => {
     const closed = await scenario({
       prompt: 'hang-until-cancel',
       persistLogsOnCancel: true,
@@ -935,7 +939,7 @@ describe('runScenario', () => {
     )).rejects.toThrow(/did not persist session\/title after turn\/end within 20ms/)
   })
 
-  it('waitForEventAfterTurnEnd holds the app for a typed post-boundary record and times out otherwise', { timeout: 20_000 }, async () => {
+  it.skipIf(slowPlatformTiming)('waitForEventAfterTurnEnd holds the app for a typed post-boundary record and times out otherwise', { timeout: 20_000 }, async () => {
     const late = await scenario({
       prompt: 'hang-until-cancel',
       persistLogsOnCancel: true,
