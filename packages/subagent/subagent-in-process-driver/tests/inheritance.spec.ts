@@ -243,7 +243,7 @@ describe('in-process policy inheritance', () => {
       await expect(readFile(blocked, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
       expect(consulted).toBe(false)
       expect(toolResultTexts(child).join('\n'))
-        .toContain('the user rejected escalating this operation to "workspace-write"')
+        .toContain('escalation available — retry this exact operation once with the atomic escalation object')
       const asked = child.session.events.find(
         (event): event is SessionEvent<'approval/asked'> => event.type === 'approval/asked',
       )
