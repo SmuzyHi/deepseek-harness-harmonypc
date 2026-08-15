@@ -1,0 +1,20 @@
+# 镜像同步：hishell-master 每次 push（PR 合入）自动镜像到 AtomGit 发布仓。
+# 镜像仓 URL/token 全部走 GitHub Secrets，公网树不出现任何内部字样（铁律 6）。
+# 镜像仓为发布面独占（无其他写入者），--force 保证与主干逐字节一致。
+name: sync-atomgit
+on:
+  push:
+    branches: [hishell-master]
+  workflow_dispatch:
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: |
+          git push --force "$PUSH_URL" HEAD:hishell-master
+          git push --force "$PUSH_URL" origin/master:master
+        env:
+          PUSH_URL: ${{ secrets.ATOMGIT_PUSH_URL }}
