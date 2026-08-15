@@ -1,6 +1,6 @@
 {
   "name": "@deepseek-ai/dsh-tool-fs-search",
-  "description": "Model-facing filesystem discovery tools (glob, grep) backed by the packaged ripgrep binary (@vscode/ripgrep)",
+  "description": "Model-facing filesystem discovery tools (glob, grep) backed by a ripgrep resolved system-first then packaged (@vscode/ripgrep, optional); PR-7+审计回退",
   "version": "0.1.0-rc.5",
   "publishConfig": {
     "access": "public"
@@ -32,7 +32,6 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@vscode/ripgrep": "^1.18.0",
     "@deepseek-ai/schemastery": "workspace:^"
   },
   "peerDependencies": {
@@ -60,5 +59,8 @@
     "@deepseek-ai/dsh-timeout": "workspace:^",
     "@deepseek-ai/dsh-tools": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
+  },
+  "optionalDependencies": {
+    "@vscode/ripgrep": "^1.18.0"
   }
 }

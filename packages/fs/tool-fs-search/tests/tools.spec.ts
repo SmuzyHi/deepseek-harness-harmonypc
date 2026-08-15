@@ -10,7 +10,7 @@
  * Real-`rg` behavior is pinned separately in integration.spec.ts.
  */
 
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { join, sep } from 'node:path'
 import { createUserMessage, CallId } from '@deepseek-ai/dsh-llm'
@@ -19,7 +19,6 @@ import ToolRuntime, { TOOL_ABORTED_BEFORE_DISPATCH, type ToolExecution, type Too
 import { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 import type { SubprocessCollectedOutputs, SubprocessHandle, SubprocessOutcome, SubprocessOutputRead, SubprocessOutputReader, SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
-import { rgPath } from '@vscode/ripgrep'
 import { SpillLocator, SpillStore } from '@deepseek-ai/dsh-spill'
 import type { SaveTextSpill, SpillRef } from '@deepseek-ai/dsh-spill'
 import * as ToolFsSearch from '@deepseek-ai/dsh-tool-fs-search'
@@ -230,6 +229,13 @@ function text(result: { content: { type: string; text?: string }[] }): string {
 function matchLine(path: string, lineNumber: number, lineText: string): string {
   return JSON.stringify({ type: 'match', data: { path: { text: path }, lines: { text: lineText }, line_number: lineNumber, absolute_offset: 0, submatches: [] } })
 }
+
+// @vscode/ripgrep 平台包在 musl/openharmony 上模块评估即抛（无 -openharmony-arm64
+// 变体）——不能静态 import；运行时经 resolveRgPath 三态解析（系统优先、打包兜底）。
+let rgPath: string
+beforeAll(async () => {
+  rgPath = await resolveRgPath()
+})
 
 describe('registration', () => {
   it('registers glob and grep unconditionally with their prompt sections', async () => {
