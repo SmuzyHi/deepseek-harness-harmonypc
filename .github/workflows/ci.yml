@@ -11,8 +11,11 @@ jobs:
     container:
       image: swr.cn-north-4.myhuaweicloud.com/harmonybrew/ci-runner:latest
     timeout-minutes: 60
+    defaults:
+      run:
+        shell: sh
     steps:
-      - run: node --version && pnpm --version && git --version
+      - run: echo "PATH=$PATH" && command -v node && node --version && pnpm --version && git --version
       - uses: actions/checkout@v4
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
