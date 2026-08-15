@@ -9,7 +9,7 @@
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { readdirSync } from 'node:fs'
-import { open, mkdir, readFile, readdir, realpath, link, rm, stat, truncate } from 'node:fs/promises'
+import { open, mkdir, readFile, readdir, realpath, link, rm, stat, truncate, rename } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { scheduler } from 'node:timers/promises'
@@ -544,9 +544,20 @@ export class JsonlSessionPersistence extends SessionPersistence implements Persi
     // Publish via link()+unlink(), NOT rename(): link fails with EEXIST if the
     // final path already exists, so two processes materializing the same id
     // concurrently cannot clobber each other. rename() would silently overwrite.
+    // hmdfs（HiShell）无硬链接：link 恒 EPERM（PR-1）→ 回退同目录 rename，排他
+    // 语义退化为"先查后写"（rejectExistingLog 收敛并发窗口）。
     let linked = false
     try {
       await link(tmp, finalPath)
+      linked = true
+    } catch (error: unknown) {
+      // hmdfs（HiShell）无硬链接：link 恒 EPERM——回退同目录 rename（原子性不变；
+      // 排他创建退化为"先查后写"，并发窗口由前置 rejectExistingLog 收敛，见 PR-1）。
+      const code = error instanceof Error && 'code' in error ? (error as NodeJS.ErrnoException).code : undefined
+      if (code === undefined || !['EPERM', 'EACCES', 'EXDEV', 'ENOSYS'].includes(code)) {
+        throw error
+      }
+      await rename(tmp, finalPath)
       linked = true
     } finally {
       // Remove an unpublished temp on failure. After publication, defer cleanup
