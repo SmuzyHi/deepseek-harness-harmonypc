@@ -9,7 +9,7 @@ jobs:
   ci:
     runs-on: ubuntu-24.04-arm
     container:
-      image: ghcr.io/smuzyhi/dsh-harmonypc-ci:latest
+      image: ghcr.io/smuzyhi/deepseek-harness-harmonypc:ci
     timeout-minutes: 60
     defaults:
       run:
