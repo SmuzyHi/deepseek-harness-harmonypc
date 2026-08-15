@@ -1,4 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+
+// hmdfs 权限夹具（chmod 000 无效）或 watcher 事件语义差异——窄排除（#49/#58 口径）。
+const platformFixtureGap = process.platform === ('openharmony' as string)
+
+// hmdfs 上 chmod 600/700/755/644 无效（文件恒 660、目录恒 770，平台硬事实）：
+// openharmony 的精确 mode 断言降级为 owner 读写位保留（#49）。
+const modeMask = process.platform === ('openharmony' as string) ? 0o700 : 0o777
+
 import { Context } from '@deepseek-ai/cordis'
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -168,7 +176,9 @@ describe('layer ladder', () => {
     expect(await stored.credentials.resolve(KEY)).toEqual({ value: 'stored', source: 'file' })
   })
 
-  it.skipIf(process.platform === 'win32')('refuses a document other OS users can read', async () => {
+  // hmdfs 上 others 位恒 0（文件恒 660/770），"其他用户可读"的夹具状态
+  // 无法构造——窄范围排除（#49），与 Windows 排除 POSIX-only 夹具同口径。
+  it.skipIf(process.platform === 'win32' || process.platform === ('openharmony' as string))('refuses a document other OS users can read', async () => {
     const dir = await tempDir()
     const path = join(dir, '.credentials.yaml')
     await writeFile(path, 'DSH_CRED_TEST: leaked\n', { mode: 0o644 })
@@ -177,6 +187,22 @@ describe('layer ladder', () => {
     // world-readable file would make the 0600 the provider writes meaningless.
     await expect(ctx.plugin(LocalCredentialProvider, { path, watch: false }))
       .rejects.toThrow(/readable beyond its owner \(mode 644\)/)
+  })
+
+  it.skipIf(process.platform !== ('openharmony' as string))('proceeds with a visible warning when chmod cannot converge (filesystem ignores owner-only modes)', async () => {
+    // PR-6：hmdfs 静默忽略权限位——chmod 600 后 re-stat 未收敛即按文件系统
+    // 语义放行（group 位非安全边界），但降级必须可见（warn 一次）。
+    const dir = await tempDir()
+    const path = join(dir, '.credentials.yaml')
+    await writeFile(path, 'DSH_CRED_TEST: hmdfs-owned\n', { mode: 0o666 })
+    const ctx = new Context()
+    const warns: string[] = []
+    ;(ctx.logger as { warn: (...args: unknown[]) => void }).warn = (...args: unknown[]) => {
+      warns.push(args.join(' '))
+    }
+    await expect(ctx.plugin(LocalCredentialProvider, { path, watch: false })).resolves.toBeDefined()
+    expect(warns.some(w => w.includes('remains readable beyond its owner'))).toBe(true)
+    await ctx.fiber.dispose()
   })
 
   it('propagates a permission check that fails for a reason other than absence', async () => {
@@ -281,7 +307,7 @@ describe('document writes', () => {
     const seen = updates(ctx)
     await ctx.credentials.set(KEY, 'sk-fresh')
     expect(await readFile(path, 'utf8')).toBe('DSH_CRED_TEST: sk-fresh\n')
-    if (process.platform !== 'win32') expect((await stat(path)).mode & 0o777).toBe(0o600)
+    if (process.platform !== 'win32') expect((await stat(path)).mode & modeMask).toBe(0o600)
     expect(await ctx.credentials.resolve(KEY)).toEqual({ value: 'sk-fresh', source: 'file' })
     expect(seen).toEqual([KEY])
   })
@@ -396,7 +422,7 @@ describe('document writes', () => {
 })
 
 describe('real hot reload', () => {
-  it('publishes external edits, replaces the snapshot wholesale, and suppresses self-writes', async () => {
+  it.skipIf(platformFixtureGap)('publishes external edits, replaces the snapshot wholesale, and suppresses self-writes', async () => {
     const dir = await tempDir()
     const path = join(dir, '.credentials.yaml')
     // Watching starts on an existing document: creation racing watcher setup

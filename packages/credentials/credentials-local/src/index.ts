@@ -38,7 +38,7 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { watch as chokidarWatch } from 'chokidar'
-import { mkdir, readFile, stat } from 'node:fs/promises'
+import { mkdir, readFile, chmod, stat } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { Document, parseDocument, type YAMLError } from 'yaml'
 import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
@@ -100,7 +100,7 @@ const GROUP_OTHER_BITS = 0o077
  * @param filename - absolute path of the document.
  * @throws when the path hierarchy is invalid or the file exists with group or other permission bits set.
  */
-async function assertOwnerOnly(filename: string): Promise<void> {
+async function assertOwnerOnly(filename: string, logger?: { warn(message: string): void }): Promise<void> {
   let mode: number
   try {
     mode = (await stat(filename)).mode
@@ -114,6 +114,28 @@ async function assertOwnerOnly(filename: string): Promise<void> {
   /* v8 ignore start -- Windows has no POSIX mode enforcement; POSIX behavior tests enforce this peer. */
   const offending = mode & GROUP_OTHER_BITS
   if (offending === 0) return
+  // 平台门控（审计 A：跨平台回归护栏）：仅在 chmod 语义受限的文件系统
+  // （openharmony hmdfs，chmod 600 后 stat 恒 660/770，PR-6）尝试修复放行；
+  // 其他 POSIX 平台保持上游 fail-closed 语义（组/他人可读一律拒绝）。
+  if (process.platform !== ('openharmony' as string)) {
+    throw new Error(
+      `credentials-local: ${filename} is readable beyond its owner (mode ${(mode & 0o777).toString(8)});`
+      + ` run "chmod 600 ${filename}" before starting again`,
+    )
+  }
+  // hmdfs 上先尽力 chmod 并 re-stat 验证——收敛 = 修复成功；未收敛 = 文件系统不支持
+  // owner-only 语义（group 位本就不是安全边界），按文件系统语义放行；
+  // chmod 自身失败（只读文件系统等）则保持 fail-closed，按权限位报错。
+  try {
+    await chmod(filename, 0o600)
+    if (((await stat(filename)).mode & GROUP_OTHER_BITS) === 0) return
+    // 审计补充（PR-6 后续）：未收敛放行是安全语义降级（凭证可能组可读）——
+    // 静默放行违背"降级要可见"，warn 一次（单用户设备成立，多用户需重估）。
+    logger?.warn(`credentials-local: ${filename} remains readable beyond its owner after chmod 600 (the filesystem ignores owner-only semantics, e.g. hmdfs); proceeding per filesystem semantics`)
+    return
+  } catch {
+    // 落到下方按权限位报错
+  }
   throw new Error(
     `credentials-local: ${filename} is readable beyond its owner (mode ${(mode & 0o777).toString(8)});`
     + ` run "chmod 600 ${filename}" before starting again`,
@@ -422,7 +444,7 @@ export class LocalCredentialProvider extends CredentialProvider {
    * cannot be trusted must never be treated as "no credentials stored".
    */
   private async loadInitial(): Promise<void> {
-    await assertOwnerOnly(this.spec.filename)
+    await assertOwnerOnly(this.spec.filename, this.ctx.logger)
     let text: string
     try {
       text = await readFile(this.spec.filename, 'utf8')
@@ -465,7 +487,7 @@ export class LocalCredentialProvider extends CredentialProvider {
   private async reconcileFromDisk(): Promise<void> {
     // Re-checked on every reload and before every write: an external editor or
     // a restored backup can loosen the mode after boot.
-    await assertOwnerOnly(this.spec.filename)
+    await assertOwnerOnly(this.spec.filename, this.ctx.logger)
     let text: string | undefined
     try {
       text = await readFile(this.spec.filename, 'utf8')
