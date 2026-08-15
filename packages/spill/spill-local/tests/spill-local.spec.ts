@@ -7,6 +7,10 @@
  */
 
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
+
+// hmdfs 上 chmod 600/700 无效（文件恒 660、目录恒 770）：openharmony 的
+// 精确 mode 断言降级为 owner 读写位保留（#49 同口径）。
+const modeMask = process.platform === ('openharmony' as string) ? 0o700 : 0o777
 import { Context } from '@deepseek-ai/cordis'
 import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -92,8 +96,8 @@ describe('saveTextFile', () => {
     expect(directory.isDirectory()).toBe(true)
     expect(file.isFile()).toBe(true)
     if (process.platform !== 'win32') {
-      expect(directory.mode & 0o777).toBe(0o700)
-      expect(file.mode & 0o777).toBe(0o600)
+      expect(directory.mode & modeMask).toBe(0o700)
+      expect(file.mode & modeMask).toBe(0o600)
     }
   })
 

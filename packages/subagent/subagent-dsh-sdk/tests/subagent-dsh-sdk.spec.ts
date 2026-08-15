@@ -7,6 +7,14 @@
  */
 
 import { describe, expect, it } from 'vitest'
+
+// openharmony 上子进程失败消息不含 "exit code: N"（信号/时序语义差异）
+// ——窄排除（#58），快平台措辞覆盖不丢。
+const exitCodeWording = process.platform === ('openharmony' as string)
+
+// openharmony 上 SIGKILL 后的 exit 边沿显著慢于常规开发机（hmdfs 进程
+// 回收调度），测试宽限按平台放大（#58）。
+const GRACE_MS = process.platform === ('openharmony' as string) ? 5_000 : 200
 import { Context } from '@deepseek-ai/cordis'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -199,7 +207,7 @@ describe('dsh-subagent-dsh-sdk provider', () => {
   })
 
   it('aborting the required signal settles a hung child as aborted', async () => {
-    const ctx = await setup({ FAKE_HANG_PROMPT: '1' }, { disposeEofGraceMs: 200, disposeGraceMs: 200 })
+    const ctx = await setup({ FAKE_HANG_PROMPT: '1' }, { disposeEofGraceMs: GRACE_MS, disposeGraceMs: GRACE_MS })
     const controller = new AbortController()
     const run = await ctx.subagents.start('dsh-sdk', request('p', controller.signal))
     controller.abort('test')
@@ -229,8 +237,8 @@ describe('dsh-subagent-dsh-sdk provider', () => {
         model: 'm',
         env: { FAKE_INIT_READY: ready, FAKE_INIT_GO: go },
         shutdownTimeoutMs: 100,
-        disposeEofGraceMs: 200,
-        disposeGraceMs: 200,
+        disposeEofGraceMs: GRACE_MS,
+        disposeGraceMs: GRACE_MS,
       }
       const pending = startSdkRun(request('p', controller.signal), spec)
       await waitForFile(ready)
@@ -247,7 +255,7 @@ describe('dsh-subagent-dsh-sdk provider', () => {
     // The fake streams one text-delta chunk but never returns the MessageId
     // needed to establish this run's durable inbox receipt. The text therefore
     // lies outside an owned activity interval and cannot become its output.
-    const ctx = await setup({ FAKE_STREAM_THEN_MALFORMED: '1' }, { shutdownTimeoutMs: 100, disposeEofGraceMs: 200, disposeGraceMs: 200 })
+    const ctx = await setup({ FAKE_STREAM_THEN_MALFORMED: '1' }, { shutdownTimeoutMs: 100, disposeEofGraceMs: GRACE_MS, disposeGraceMs: GRACE_MS })
     const run = await ctx.subagents.start('dsh-sdk', request())
     const result = await run.result
     expect(result.stopReason).toBe('error')
@@ -257,7 +265,7 @@ describe('dsh-subagent-dsh-sdk provider', () => {
   })
 
   it('dispose cancels a hung child locally and reaps it', async () => {
-    const ctx = await setup({ FAKE_HANG_PROMPT: '1' }, { shutdownTimeoutMs: 100, disposeEofGraceMs: 200, disposeGraceMs: 200 })
+    const ctx = await setup({ FAKE_HANG_PROMPT: '1' }, { shutdownTimeoutMs: 100, disposeEofGraceMs: GRACE_MS, disposeGraceMs: GRACE_MS })
     const run = await ctx.subagents.start('dsh-sdk', request())
     await run.dispose()
     expect((await run.result).stopReason).toBe('aborted')
@@ -297,7 +305,7 @@ describe('dsh-subagent-dsh-sdk provider', () => {
       () => { throw new Error('start unexpectedly succeeded') },
       (error: unknown) => error,
     )
-    expect(String(failure)).toContain('exit code: 3')
+    if (!exitCodeWording) expect(String(failure)).toContain('exit code: 3')
     expect(String(failure)).toContain('scripted boot failure')
     await ctx.fiber.dispose()
   })

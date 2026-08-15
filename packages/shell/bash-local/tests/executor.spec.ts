@@ -46,9 +46,9 @@ describe('LocalBashExecutor.run', () => {
   })
 
   it('uses config cwd, overridable per call', async () => {
-    const { bash } = await setup({ cwd: '/tmp' })
+    const { bash } = await setup({ cwd: tmpdir() })
     const fromConfig = await bash.run(bash.resolve({ command: 'pwd' }))
-    expect(fromConfig.stdout.text.trim()).toMatch(/\/tmp$/)
+    expect(fromConfig.stdout.text.trim()).toBe(tmpdir())
     const fromCall = await bash.run(bash.resolve({ command: 'pwd', workdir: '/' }))
     expect(fromCall.stdout.text.trim()).toBe('/')
   })
