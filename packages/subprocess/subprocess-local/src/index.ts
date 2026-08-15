@@ -12,8 +12,11 @@ import { constants } from 'node:fs'
 import { access, stat } from 'node:fs/promises'
 import { delimiter, extname, isAbsolute, resolve } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
-import * as nodePty from 'node-pty'
-import type { IPtyForkOptions } from 'node-pty'
+// PR-4 后续（审计实锤 2026-08-15）：node-pty 是 optionalDependencies，但顶层
+// 静态 import 会让 musl 等未装 pty.node 的平台在包加载时即炸——optional 形同虚设。
+// 改 type-only import + spawnTerminal 内动态 import：缺失时 PTY 路径明确报错，
+// 非 PTY 路径不受影响。
+import type { IPty, IPtyForkOptions } from 'node-pty'
 import { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 import type {
   SubprocessHandle,
@@ -172,7 +175,13 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
       env: childEnv(spec.env),
     }
     const inspector = this.terminalInspector ?? createProcessInspector()
-    const terminal = nodePty.spawn(file, [...spec.argv.slice(1)], options)
+    let terminal: IPty
+    try {
+      const nodePty = await import('node-pty')
+      terminal = nodePty.spawn(file, [...spec.argv.slice(1)], options)
+    } catch (error: unknown) {
+      throw new Error(`subprocess-local: node-pty unavailable (optional dependency not installed on this platform) — PTY sessions unsupported`, { cause: error })
+    }
     const handle = new LocalTerminalHandle(terminal, inspector, spec.graceMs)
     this.terminals.add(handle)
     const release = async (): Promise<void> => {

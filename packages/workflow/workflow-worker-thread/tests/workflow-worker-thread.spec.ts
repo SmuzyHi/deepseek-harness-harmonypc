@@ -581,7 +581,7 @@ describe('dsh-workflow-worker-thread', () => {
           return { canary: proc.env.WORKFLOW_ENV_CANARY ?? null, keys: Object.keys(proc.env).sort() }
         `))
         expect(result.stopReason).toBe('completed')
-        const expectedKeys = process.platform === 'win32' ? ['TEMP', 'TMP'] : []
+        const expectedKeys = process.platform === 'win32' ? ['PATH', 'TEMP', 'TMP'] : ['PATH', 'TMPDIR']
         expect(result.value).toEqual({ canary: null, keys: expectedKeys })
       } finally {
         if (tsconfigPath === undefined) delete process.env.TSX_TSCONFIG_PATH
@@ -590,16 +590,17 @@ describe('dsh-workflow-worker-thread', () => {
       }
     })
 
-    it('workerSpawnEnv injects the host temp path on win32 and leaves the POSIX peer empty', () => {
+    it('workerSpawnEnv carries PATH and the host temp path on both peers', () => {
       const tmp = tmpdir()
-      expect(workerSpawnEnv('win32')).toEqual({ TMP: tmp, TEMP: tmp })
-      expect(workerSpawnEnv('linux')).toEqual({})
+      expect(workerSpawnEnv('win32')).toEqual({ PATH: process.env.PATH ?? '', TMP: tmp, TEMP: tmp })
+      expect(workerSpawnEnv('linux')).toEqual({ PATH: process.env.PATH ?? '', TMPDIR: tmp })
     })
 
     it('workerSpawnEnv forwards TSX_TSCONFIG_PATH when the snapshot harness pins it', () => {
       const tsconfig = fileURLToPath(new URL('../../../../tsconfig.json', import.meta.url))
-      expect(workerSpawnEnv('linux', tsconfig)).toEqual({ TSX_TSCONFIG_PATH: tsconfig })
+      expect(workerSpawnEnv('linux', tsconfig)).toEqual({ PATH: process.env.PATH ?? '', TMPDIR: tmpdir(), TSX_TSCONFIG_PATH: tsconfig })
       expect(workerSpawnEnv('win32', tsconfig)).toEqual({
+        PATH: process.env.PATH ?? '',
         TMP: tmpdir(),
         TEMP: tmpdir(),
         TSX_TSCONFIG_PATH: tsconfig,
@@ -622,8 +623,8 @@ describe('dsh-workflow-worker-thread', () => {
         `))
         expect(result.stopReason).toBe('completed')
         const expectedKeys = process.platform === 'win32'
-          ? ['TEMP', 'TMP', 'TSX_TSCONFIG_PATH']
-          : ['TSX_TSCONFIG_PATH']
+          ? ['PATH', 'TEMP', 'TMP', 'TSX_TSCONFIG_PATH']
+          : ['PATH', 'TMPDIR', 'TSX_TSCONFIG_PATH']
         expect(result.value).toEqual({ keys: expectedKeys, tsconfig })
       } finally {
         delete process.env.TSX_TSCONFIG_PATH

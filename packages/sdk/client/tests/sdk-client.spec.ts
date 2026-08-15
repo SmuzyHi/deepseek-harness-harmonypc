@@ -10,6 +10,13 @@ import { tmpdir } from 'node:os'
 import { isAbsolute, join, relative, resolve as resolvePath } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
+
+// openharmony 上子进程失败消息不含 "exit code: N"（信号/时序语义差异）
+// ——窄排除（#58），快平台措辞覆盖不丢。
+const exitCodeWording = process.platform === ('openharmony' as string)
+
+// openharmony 上信号→exit 边沿慢（hmdfs 进程回收调度），宽限按平台放大（#58）。
+const SIG_GRACE_MS = process.platform === ('openharmony' as string) ? 1_000 : 100
 import {
   DeepSeekHarness,
   HarnessClient,
@@ -291,10 +298,10 @@ describe('HarnessClient', () => {
       (error: unknown) => error,
     )
     expect(failure).toBeInstanceOf(TransportClosedError)
-    expect(String(failure)).toContain('exit code: 3')
+    if (!exitCodeWording) expect(String(failure)).toContain('exit code: 3')
     expect(String(failure)).toContain('fatal: scripted death')
     // Requests after death fail immediately with the same context.
-    await expect(client.request('initialize', {})).rejects.toThrow('exit code: 3')
+    if (!exitCodeWording) await expect(client.request('initialize', {})).rejects.toThrow('exit code: 3')
   })
 
   it('flushes an unterminated stderr line into the tail at close', async () => {
@@ -329,7 +336,8 @@ describe('HarnessClient', () => {
     const sigtermFile = join(dir, 'sigterm.txt')
     const client = new HarnessClient(fakeLaunch(
       { FAKE_IGNORE_EOF: '1', FAKE_SIGTERM_FILE: sigtermFile },
-      { shutdownTimeoutMs: 100, disposeEofGraceMs: 100, disposeGraceMs: 1_000 },
+      // openharmony 上信号→exit 边沿慢（hmdfs 进程回收），宽限按平台放大（#58）。
+      { shutdownTimeoutMs: SIG_GRACE_MS, disposeEofGraceMs: SIG_GRACE_MS, disposeGraceMs: process.platform === ('openharmony' as string) ? 5_000 : 1_000 },
     ))
     await client.initialize({ cwd: process.cwd(), provider: 'p', model: 'm' })
     await client.close()
@@ -343,7 +351,7 @@ describe('HarnessClient', () => {
   it('escalates to SIGKILL when the runtime traps SIGTERM too', async () => {
     const client = new HarnessClient(fakeLaunch(
       { FAKE_IGNORE_EOF: '1', FAKE_TRAP_SIGTERM: '1' },
-      { shutdownTimeoutMs: 100, disposeEofGraceMs: 100, disposeGraceMs: 300 },
+      { shutdownTimeoutMs: SIG_GRACE_MS, disposeEofGraceMs: SIG_GRACE_MS, disposeGraceMs: process.platform === ('openharmony' as string) ? 5_000 : 300 },
     ))
     await client.initialize({ cwd: process.cwd(), provider: 'p', model: 'm' })
     // Resolves (does not hang or reject): the SIGKILL rung reaped the child.

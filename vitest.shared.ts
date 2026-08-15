@@ -6,7 +6,12 @@ const decoratorSyntax = /^\s*@[A-Za-z_$][\w$]*/m
  * Worker arguments that keep process-wide Web Storage from shadowing jsdom storage.
  * Node lists the positive spelling in `allowedNodeEnvironmentFlags` for this negatable flag.
  */
-export const vitestExecArgv = process.allowedNodeEnvironmentFlags.has('--webstorage') ? ['--no-webstorage'] : []
+const vitestExecArgv: string[] = process.allowedNodeEnvironmentFlags.has('--webstorage') ? ['--no-webstorage'] : []
+// openharmony 无 node-addon-require-builtin 的 musl 预编译（PR-2 治本前），
+// vendored loader 的 internal 面依赖 --expose-internals；vitest 的线程/进程
+// worker 各有独立 execArgv，需随池注入（#51）。
+if (process.platform === 'openharmony') vitestExecArgv.push('--expose-internals')
+export { vitestExecArgv }
 
 /**
  * Transform standard TypeScript decorators before Vite's default parser sees source files.
