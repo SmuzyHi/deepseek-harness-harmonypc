@@ -1,6 +1,6 @@
 /**
  * The model-facing filesystem discovery tool suite (`glob`, `grep`) over the
- * packaged ripgrep binary (`@vscode/ripgrep`). This single plugin registers
+ * system ripgrep binary (resolved from PATH). This single plugin registers
  * both tools; the binary ships inside the npm dependency, so no system `rg`
  * install and no shell layer is involved.
  *
@@ -92,6 +92,8 @@ export interface Config {
    * `@deepseek-ai/dsh-tool-call-timeout-policy` through `exec.signal`.
    */
   timeoutMs?: number
+  /** Ripgrep binary source: system PATH first with packaged fallback (default). */
+  rgSource?: 'system' | 'packaged' | 'auto'
 }
 
 export const Config: z<Config> = z.object({
@@ -104,6 +106,7 @@ export const Config: z<Config> = z.object({
   graceMs: z.number().default(SEARCH_GRACE_MS),
   stderrMaxBytes: z.number().default(SEARCH_STDERR_MAX_BYTES),
   timeoutMs: z.number().default(SEARCH_TIMEOUT_MS),
+  rgSource: z.union(['system', 'packaged', 'auto'] as const).default('auto'),
 })
 
 /** The shape after schemastery applied the defaults. */
@@ -147,6 +150,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     graceMs: resolved.graceMs,
     stderrMaxBytes: resolved.stderrMaxBytes,
     timeoutMs: resolved.timeoutMs,
+    rgSource: resolved.rgSource,
   })
   applyGrepTool(ctx, {
     maxMatches: resolved.grepMaxMatches,
@@ -156,5 +160,6 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     graceMs: resolved.graceMs,
     stderrMaxBytes: resolved.stderrMaxBytes,
     timeoutMs: resolved.timeoutMs,
+    rgSource: resolved.rgSource,
   })
 }

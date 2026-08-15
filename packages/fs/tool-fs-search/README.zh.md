@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-**面向模型的文件系统发现工具**（`glob`、`grep`）由 **打包的 ripgrep 二进制**（`@vscode/ripgrep`）支持，而不是由 `ctx.fs` 提供方方法或系统 `rg` 安装支持。注册是无条件的：二进制随 NPM 依赖一起交付，因此没有加载期可用性探针。每次调用都通过 `ctx.subprocess` seam 以固定 argv 向量 spawn 该二进制（前缀 `--no-config`，使宿主的 `RIPGREP_CONFIG_PATH` 无法向不受约束的 spawn 注入 `--pre` 预处理器；模型控制的值是普通 argv 元素——不存在 shell 层，因此不涉及 shell 引号处理），解析原始 `rg` 输出，并返回相对于工作目录的规范值。本包注入 `tools`、`systemPrompt` 和 `subprocess`，有意**不**注入 `fs`；格式化结果 spill 为可选功能，因此机会性读取 `ctx.spillStore`，调用方式为 `ctx.get()`。
+**面向模型的文件系统发现工具**（`glob`、`grep`）由**系统 ripgrep 二进制**（从 `PATH` 以 `X_OK` 探测解析）支持，而不是由 `ctx.fs` 提供方方法支持。注册是无条件的；二进制在首次搜索调用时解析（每进程记忆化），缺失 `rg` 时该调用以 `SEARCH_FAILED` 失败，而不是破坏组合。每次调用都通过 `ctx.subprocess` seam 以固定 argv 向量 spawn 该二进制（前缀 `--no-config`，使宿主的 `RIPGREP_CONFIG_PATH` 无法向不受约束的 spawn 注入 `--pre` 预处理器；模型控制的值是普通 argv 元素——不存在 shell 层，因此不涉及 shell 引号处理），解析原始 `rg` 输出，并返回相对于工作目录的规范值。本包注入 `tools`、`systemPrompt` 和 `subprocess`，有意**不**注入 `fs`；格式化结果 spill 为可选功能，因此机会性读取 `ctx.spillStore`，调用方式为 `ctx.get()`。
 
 ```ts ignore-check
 // A deployment chooses how over-cap glob pages are selected.
@@ -129,6 +129,6 @@ glob 描述声明了配置的超过上限排序方式。生成的 [`glob` 和 `g
 ## 已知限制与暂缓事项
 
 - **搜索与文件访问没有共享工作区证明**——只有当工作目录与文件系统根目录指向同一工作区时，返回路径才可继续读取；本包不执行运行时跨服务校验。
-- **打包二进制固定在依赖版本上**——`@vscode/ripgrep` 覆盖其随附的平台（macOS/Linux/Windows，x64/arm64）；不支持的平台或损坏的安装会以 `SEARCH_FAILED` 使调用失败。远程或虚拟文件系统需要共置的工作区或另一个搜索消费方。
+- **系统 `rg` 必须在 PATH 上**——首次调用时以 `X_OK` 探测 `PATH` 中的可执行 `rg`（Windows 为 `rg.exe`）；缺失时调用以 `SEARCH_FAILED` 失败，探测详情列出被搜条目（HiShell 由 harmonybrew 提供 `rg`）。远程或虚拟文件系统需要共置的工作区或另一个搜索消费方。
 - **schema 只暴露一个有界页面**——偏移分页、大小写开关、替代输出模式与提供方支撑的发现仍不在本包范围内；达到上限的完整输出需要 spill 后端。
 - **启用采样时仅按搜索根正下方的第一段路径分组**——超过上限的 `glob` 页面在这些顶层条目之间平衡，因此集中在更深处的结果（一棵均匀树里某个繁忙目录）在该层级之下仍会呈现不均；递归平衡被延期。
