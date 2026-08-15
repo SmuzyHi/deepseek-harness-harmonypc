@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import * as yaml from 'js-yaml'
 import { describe, expect, it } from 'vitest'
 
-// fork 治理（#42）：上游 .github/workflows 已删（Gitea 无 runner），
+// fork governance: upstream workflows removed (no local CI runner),
 // 工作流内容契约套件在无文件时跳过。
 const workflowsPresent = existsSync(resolve(import.meta.dirname, '.github/workflows/ci.yml'))
 
