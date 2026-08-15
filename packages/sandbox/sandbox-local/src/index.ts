@@ -34,7 +34,7 @@ import {
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { assertNever } from '@deepseek-ai/dsh-llm'
-import { SandboxProvider, SandboxUnavailableError } from '@deepseek-ai/dsh-sandbox'
+import { SandboxProvider, SandboxUnavailableError, writableRoots } from '@deepseek-ai/dsh-sandbox'
 import type { ConfinedArgv, ConfinedSandboxMode, RunnerFailureRule, SandboxEnforcement, SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { AclWriteGrant, assertTempRootOutsideWorkspace, tempWriteSid, workspaceWriteSid } from '@deepseek-ai/dsh-sandbox-windows-acl'
@@ -62,6 +62,14 @@ export interface Config {
   runnerFailureSignatures?: string[]
   /** Positive timeout for each functional probe; zero would mean unbounded to Node. */
   probeTimeoutMs?: number
+  /**
+   * Absolute path of the userspace fs-fence preload `.so` (PR-8 hishell):
+   * the openharmony chain's sole runner. When absent or unloadable the
+   * platform fails closed with `SANDBOX_UNAVAILABLE` (the pre-fs-fence
+   * behavior). The `.so` must be self-signed in the loader's signature
+   * domain (OBS-2) for dsh's node process to `dlopen` it.
+   */
+  fsFenceSoPath?: string
 }
 
 /** Probe whether `bwrap` can create the profile; the provider caches the bounded result. */
@@ -138,7 +146,7 @@ export interface SandboxInternals {
 }
 
 /** The chain's verdict: which runner confines, and how completely it enforces. */
-type SelectedRunner = { runner: 'bwrap' | 'landlock' | 'seatbelt' | 'windows-acl'; enforcement: SandboxEnforcement }
+type SelectedRunner = { runner: 'bwrap' | 'landlock' | 'seatbelt' | 'windows-acl' | 'fs-fence'; enforcement: SandboxEnforcement }
 
 /** One live session/workspace pair's private temp directory and capability. */
 interface AclTempCapability {
@@ -158,6 +166,9 @@ interface AclTempCapability {
  */
 const PLATFORM_CHAINS: Record<string, readonly SelectedRunner['runner'][]> = {
   linux: ['bwrap', 'landlock'],
+  // HiShell（HarmonyOS PC）：无 bwrap/Landlock（seccomp 实测 SIGSYS），唯一
+  // 可用 = 用户态 fs-fence（LD_PRELOAD，writableRoots 白名单，PR-8 hishell）。
+  openharmony: ['fs-fence'],
   darwin: ['seatbelt'],
   // The Windows restricted-token runner (@deepseek-ai/dsh-sandbox-windows-acl):
   // a sole candidate, selected without a probe — its execution-time refusal
@@ -184,6 +195,9 @@ const STATIC_ENFORCEMENT: Record<SelectedRunner['runner'], SandboxEnforcement> =
   // workspace file to a path outside it. The backend enforces the remaining
   // ACL-addressable surface but must not advertise the absolute promise.
   'windows-acl': 'partial',
+  // fs-fence is a policy fence, not a kernel boundary (the dsh-fs-sandbox
+  // threat model): it protects model-controlled paths, not hostile code.
+  'fs-fence': 'partial',
 }
 
 /**
@@ -209,6 +223,8 @@ const DENIAL_SIGNATURES = {
   // pwsh/.NET: "Access to the path '...' is denied."; cmd: "Access is denied.";
   // node EACCES: "permission denied".
   'windows-acl': ['access is denied', 'access to the path', 'permission denied'],
+  // fs-fence（fence.c）白名单外写入返回 EACCES/EPERM。
+  'fs-fence': ['permission denied', 'operation not permitted'],
   runnerCommand: ['read-only file system', 'permission denied'],
 } as const satisfies Record<SelectedRunner['runner'] | 'runnerCommand', readonly string[]>
 
@@ -237,6 +253,8 @@ const RUNNER_FAILURE_RULES = {
   }],
   seatbelt: [{ fatalSignatures: ['sandbox-exec: '] }],
   'windows-acl': [{ allowedExitCodes: [WINDOWS_ACL_RUNNER_FAILURE_EXIT], fatalSignatures: ['windows-acl-run: '] }],
+  // fs-fence 启动器：exit 125 + fatal 行 = launcher 失败（fail-closed，绝不无沙箱透传）。
+  'fs-fence': [{ allowedExitCodes: [125], fatalSignatures: ['fs-fence: launcher failed'] }],
 } as const satisfies Record<SelectedRunner['runner'], readonly RunnerFailureRule[]>
 
 /**
@@ -253,6 +271,7 @@ export class LocalSandboxProvider extends SandboxProvider {
     runnerCommand: z.array(z.string()).default([]),
     runnerFailureSignatures: z.array(z.string()).default([]),
     probeTimeoutMs: z.natural().default(5_000),
+    fsFenceSoPath: z.string(),
   })
 
   /** Test hook (mirrors the bash executors' `internals`). */
@@ -261,6 +280,7 @@ export class LocalSandboxProvider extends SandboxProvider {
   private readonly runnerCommand: string[] | undefined
   private readonly configuredRunnerFailureSignatures: string[]
   private readonly probeTimeoutMs: number
+  private readonly fsFenceSoPath: string | undefined
   /** Cached chain verdict; undefined until the first confined wrap needs it. */
   private selectedRunner: SelectedRunner | 'unavailable' | undefined
   /**
@@ -292,6 +312,7 @@ export class LocalSandboxProvider extends SandboxProvider {
     this.runnerCommand = runner.length > 0 ? runner : undefined
     this.configuredRunnerFailureSignatures = runnerFailureSignatures
     this.probeTimeoutMs = config.probeTimeoutMs as number
+    this.fsFenceSoPath = config.fsFenceSoPath
     assertPositiveFinite('probeTimeoutMs', this.probeTimeoutMs)
     // The temp grants are revoked with the provider: a clean server
     // shutdown leaves no temp ACEs behind (workspace ACEs stand by design —
@@ -324,8 +345,11 @@ export class LocalSandboxProvider extends SandboxProvider {
     }
     const selected = this.selectRunner(policy.mode)
     const runnerArgv = this.runnerArgv(selected.runner, policy)
+    // fs-fence wraps with `env VAR=...`（toybox env 不吃 `--` 分隔符，会把它当程序）；
+    // 其余 runner（bwrap/landlock/seatbelt）用 `--` 分隔 profile 与调用方 argv。
+    const separator = selected.runner === 'fs-fence' ? [] : ['--']
     return {
-      argv: [...runnerArgv, '--', ...argv],
+      argv: [...runnerArgv, ...separator, ...argv],
       enforcement: selected.enforcement,
       denialSignatures: DENIAL_SIGNATURES[selected.runner],
       runnerFailureRules: RUNNER_FAILURE_RULES[selected.runner],
@@ -339,6 +363,7 @@ export class LocalSandboxProvider extends SandboxProvider {
       case 'landlock': return [this.landlockLauncher(), ...landlockProfileArgs(policy)]
       case 'seatbelt': return [this.seatbeltExec(), ...seatbeltProfileArgs(policy)]
       case 'windows-acl': return this.windowsAclRunnerArgv(policy)
+      case 'fs-fence': return this.fsFenceArgv(policy)
       default: return assertNever(runner)
     }
   }
@@ -355,6 +380,21 @@ export class LocalSandboxProvider extends SandboxProvider {
    * @param policy - the resolved per-call policy.
    * @returns the runner invocation.
    */
+  /**
+   * The fs-fence runner invocation (PR-8 hishell): preload the fence `.so`
+   * and feed the writable-roots allow-list. Absent or missing `.so` fails
+   * closed with `SANDBOX_UNAVAILABLE` — never an unconfined passthrough.
+   * @param policy - the resolved per-call policy.
+   * @returns the `env` prefix argv (the seam appends `--` + the caller argv).
+   */
+  private fsFenceArgv(policy: SandboxPolicy): string[] {
+    const so = this.fsFenceSoPath
+    if (so === undefined || !existsSync(so)) {
+      throw new SandboxUnavailableError(policy.mode, 'fs-fence .so 未配置或缺失（配置 fsFenceSoPath）')
+    }
+    return ['env', `LD_PRELOAD=${so}`, `FS_FENCE_ROOTS=${writableRoots(policy).join(':')}`]
+  }
+
   private windowsAclRunnerArgv(policy: SandboxPolicy): string[] {
     const sessionId = policy.sessionId
     if (sessionId === undefined || policy.mode === 'read-only') {
@@ -534,6 +574,9 @@ export class LocalSandboxProvider extends SandboxProvider {
           ?? (() => defaultProbeWindowsAcl(this.windowsAclRunnerInvocation(), this.probeTimeoutMs))
         return probe() ? 'partial' : 'unusable'
       }
+      // fs-fence：openharmony 链的 sole candidate（chainVerdict 不探测单候选），
+      // 装配期（fsFenceArgv）的 .so 检查 fail-closed。
+      case 'fs-fence': return 'partial'
       default: return assertNever(runner)
     }
   }

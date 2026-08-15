@@ -9,6 +9,9 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+
+// hmdfs 权限夹具（chmod 0o555 无效）——窄排除（#49 同口径）。
+const platformFixtureGap = process.platform === ('openharmony' as string)
 import { Context } from '@deepseek-ai/cordis'
 import type { ShellRunResult, CollectedOutput } from '@deepseek-ai/dsh-shell'
 import { SANDBOX_UNAVAILABLE, SandboxProvider, SandboxUnavailableError } from '@deepseek-ai/dsh-sandbox'
@@ -514,7 +517,7 @@ describe('result facts', () => {
     expect(result.sandbox).toEqual({ mode: 'read-only', denied: false, enforcement: 'full' })
   })
 
-  it('reports a real permission failure as a sandbox denial with the mode it ran under', async () => {
+  it.skipIf(platformFixtureGap)('reports a real permission failure as a sandbox denial with the mode it ran under', async () => {
     const { bash } = await setup()
     const lockedDir = join(mkdtempSync(join(tmpdir(), 'dsh-sandbox-denied-')), 'locked')
     mkdirSync(lockedDir)

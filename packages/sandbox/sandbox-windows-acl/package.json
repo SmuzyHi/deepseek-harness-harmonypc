@@ -41,13 +41,14 @@
     "@deepseek-ai/dsh-invariants": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
-  "dependencies": {
-    "koffi": "^3.1.0"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@deepseek-ai/dsh-invariants": "workspace:^",
     "@deepseek-ai/dsh-pwsh-local": "workspace:^",
     "@deepseek-ai/dsh-sandbox-local": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
+  },
+  "optionalDependencies": {
+    "koffi": "^3.1.0"
   }
 }
