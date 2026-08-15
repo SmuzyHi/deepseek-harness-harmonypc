@@ -4,6 +4,10 @@
  */
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
+
+// lightningcss 无 openharmony 供给（npmmirror 404；linux-arm64-musl 在真机
+// dlopen SIGSEGV，与 Alpine 系同族 #64）——依赖其的用例窄排除（#58）。
+const lightningAvailable = process.platform !== ('openharmony' as string)
 import { CLIENT_EXTERNALS, clientBundle } from '../packages/client/tsdown.client.ts'
 
 type ResolveId = (source: string) => null | { id: string; external: boolean }
@@ -20,7 +24,7 @@ function clientConfigs(id = '@deepseek-ai/dsh-client-test') {
   ).filter(config => config.platform === 'browser')
 }
 
-describe('client bundle build faces', () => {
+describe.skipIf(!lightningAvailable)('client bundle build faces', () => {
   it('watches source in development and consumes emitted JavaScript in the Client build', () => {
     const bundle = clientBundle('@deepseek-ai/dsh-client-test', ['lib/types/index.js'])
     const development = bundle({ env: {} }).find(config => config.platform === 'browser')
@@ -56,7 +60,7 @@ function cssModulePlugin(): CssModulePlugin {
   return plugin
 }
 
-describe('client bundle purity gate', () => {
+describe.skipIf(!lightningAvailable)('client bundle purity gate', () => {
   const resolveId = purityResolveId()
 
   it('leaves platform table entries and non-scoped specifiers alone', () => {
@@ -103,7 +107,7 @@ describe('client bundle purity gate', () => {
   })
 })
 
-describe('client bundle debug artifacts', () => {
+describe.skipIf(!lightningAvailable)('client bundle debug artifacts', () => {
   it('emits source maps for plugin TS and TSX outside the Vite module graph', () => {
     const configs = clientConfigs()
     expect(configs[0]?.sourcemap).toBe(true)
@@ -151,7 +155,7 @@ describe('client bundle debug artifacts', () => {
   })
 })
 
-describe('client bundle CSS Modules watch graph', () => {
+describe.skipIf(!lightningAvailable)('client bundle CSS Modules watch graph', () => {
   it('registers the physical stylesheet read behind a virtual module', async () => {
     const plugin = cssModulePlugin()
     const importer = fileURLToPath(new URL(

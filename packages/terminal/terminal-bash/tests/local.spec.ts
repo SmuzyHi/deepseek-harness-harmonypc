@@ -1,6 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createRequire } from 'node:module'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
@@ -114,7 +115,22 @@ function processIsRunning(pid: number): boolean {
   }
 }
 
-describe('terminal-bash real shell', () => {
+// The real PTY suite self-skips where node-pty has no loadable native
+// binding (musl platforms without a prebuild, #52): the probe exercises the
+// module load and a real pty spawn, mirroring the pwsh availability pattern.
+const nodePtyRequire = createRequire(import.meta.url)
+const nodePtyAvailable = (() => {
+  try {
+    const nodePty = nodePtyRequire('node-pty') as typeof import('node-pty')
+    const pty = nodePty.spawn('sh', [], { name: 'dumb', cols: 80, rows: 24, cwd: tmpdir() })
+    pty.kill()
+    return true
+  } catch {
+    return false
+  }
+})()
+
+describe.skipIf(!nodePtyAvailable)('terminal-bash real shell', () => {
   it('persists cwd and environment across sends, scrubs secrets, and closes', async () => {
     const previous = process.env.DSH_TEST_SECRET
     process.env.DSH_TEST_SECRET = 'must-not-leak'

@@ -2,6 +2,14 @@ import { mkdtempSync, readFileSync, statSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+
+// openharmony 的 /dev/null 描述符类型与常规 POSIX 不同（fd 类型语义差异）
+// ——窄排除（#58），快平台覆盖不丢。
+const slowPlatformTiming = process.platform === ('openharmony' as string)
+
+// hmdfs 上 chmod 600/700/755/644 无效（文件恒 660、目录恒 770，平台硬事实）：
+// openharmony 的精确 mode 断言降级为 owner 读写位保留（#49）。
+const modeMask = process.platform === ('openharmony' as string) ? 0o700 : 0o777
 import {
   killGroup,
   OutputCollector,
@@ -162,8 +170,8 @@ describe('spawnSubprocess', () => {
   })
 
   it('runs in the requested cwd', async () => {
-    const result = await finish(spawnSubprocess(spec('pwd', { cwd: '/tmp' })))
-    expect(result.stdout.text.trim()).toMatch(/\/tmp$/)
+    const result = await finish(spawnSubprocess(spec('pwd', { cwd: tmpdir() })))
+    expect(result.stdout.text.trim()).toBe(tmpdir())
   })
 
   it('kills the process group with SIGTERM when the signal fires', async () => {
@@ -328,7 +336,7 @@ describe('stdin and extra env (set by in-process plugins)', () => {
     expect(result.stdout.text).toBe('')
   })
 
-  it('gives fd 0 the exact pre-seam type: /dev/null when no stdin, a pipe when supplied', async () => {
+  it.skipIf(slowPlatformTiming)('gives fd 0 the exact pre-seam type: /dev/null when no stdin, a pipe when supplied', async () => {
     // With no bytes, fd 0 remains the pre-spawn `ignore` default (/dev/null, a character device).
     // Supplied bytes use Node's spawn pipe, which is an AF_UNIX socket rather than a FIFO.
     const none = await finish(spawnSubprocess(spec('test -c /dev/stdin && echo char || echo other')))
@@ -937,7 +945,7 @@ describe('environment and spill-file hardening', () => {
     ))
     const path = result.stdout.spillPath!
     expect(path).toMatch(/dsh-subprocess-\d+-\d+-[0-9a-f]{12}-stdout\.log$/)
-    const mode = statSync(path).mode & 0o777
+    const mode = statSync(path).mode & modeMask
     expect(mode).toBe(0o600)
   })
 
@@ -947,7 +955,7 @@ describe('environment and spill-file hardening', () => {
     ))
     const dir = dirname(result.stdout.spillPath!)
     expect(dir).toMatch(/dsh-subprocess-/)
-    const mode = statSync(dir).mode & 0o777
+    const mode = statSync(dir).mode & modeMask
     expect(mode).toBe(0o700)
   })
 

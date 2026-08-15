@@ -209,21 +209,21 @@ describe('typert loader', () => {
     if (mounted?.fiber === undefined) throw new Error('fixture loader entry has no fiber')
     ctx.emit('internal/plugin', mounted.fiber)
     ctx.emit('internal/plugin', mounted.fiber)
-    await new Promise(resolve => setTimeout(resolve, 20))
+    await new Promise(resolve => setTimeout(resolve, process.platform === ('openharmony' as string) ? 200 : 20))
     expect(ctx.typert.list()).toHaveLength(1)
 
     await ctx.loader.remove(id)
     await ctx.loader.await()
     // The unmount reconciliation rides a queued microtask flush.
-    await new Promise(resolve => setTimeout(resolve, 20))
+    await new Promise(resolve => setTimeout(resolve, process.platform === ('openharmony' as string) ? 200 : 20))
     expect(ctx.typert.get('@fixture/with-typert#Thing')).toBeUndefined()
     await ctx.loader.remove(plainId)
     await ctx.loader.await()
-    await new Promise(resolve => setTimeout(resolve, 20))
+    await new Promise(resolve => setTimeout(resolve, process.platform === ('openharmony' as string) ? 200 : 20))
 
     await ctx.loader.create({ name: '@fixture/with-typert' })
     await ctx.loader.await()
-    await new Promise(resolve => setTimeout(resolve, 20))
+    await new Promise(resolve => setTimeout(resolve, process.platform === ('openharmony' as string) ? 200 : 20))
     expect(ctx.typert.get('@fixture/with-typert#Thing')).toBeDefined()
   })
 
@@ -290,7 +290,7 @@ describe('typert loader', () => {
     await loaderFiber.dispose()
     queued?.()
     releaseImport?.()
-    await new Promise(resolve => setTimeout(resolve, 20))
+    await new Promise(resolve => setTimeout(resolve, process.platform === ('openharmony' as string) ? 200 : 20))
 
     expect(ctx.typert.getPackage('@fixture/pending')).toBeUndefined()
   })
@@ -398,7 +398,7 @@ describe('typert loader', () => {
 
     await ctx.loader.create({ name: '@fixture/steady-failure' })
     await ctx.loader.await()
-    await new Promise(resolve => setTimeout(resolve, 20))
+    await new Promise(resolve => setTimeout(resolve, process.platform === ('openharmony' as string) ? 200 : 20))
 
     expect(logged).toHaveBeenCalledWith(expect.objectContaining({ message: 'register failed' }))
     expect(ctx.typert.getPackage('@fixture/steady-failure')).toBeUndefined()

@@ -239,7 +239,10 @@ function expectMergedPair(fixture: Fixture): void {
   )
 }
 
-describe('translation pairing merge composition', { timeout: 15_000 }, () => {
+// openharmony（musl/hmdfs）子进程链显著慢于常规开发机（wasm 变换 + 多进程
+// 夹具），超时上限按平台放宽（#56）。
+const SPEC_TIMEOUT_MS = process.platform === ('openharmony' as string) ? 180_000 : 15_000
+describe('translation pairing merge composition', { timeout: SPEC_TIMEOUT_MS }, () => {
   it('rejects a pairing-record path outside the repository', () => {
     const fixture = createFixture(false)
 

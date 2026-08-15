@@ -2,7 +2,7 @@
 
 import { createHash, randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
-import { chmod, link, mkdir, open, readFile, unlink } from 'node:fs/promises'
+import { chmod, link, mkdir, open, readFile, rename, unlink } from 'node:fs/promises'
 import { dirname, join, parse, resolve } from 'node:path'
 import {
   AttachmentError,
@@ -77,7 +77,16 @@ async function syncDirectory(path: string): Promise<void> {
   /* v8 ignore next -- Windows cannot open directory handles; NTFS metadata journaling owns entry durability there. */
   if (process.platform === 'win32') return
   /* v8 ignore start -- Windows cannot exercise directory fsync; POSIX behavior tests enforce this peer. */
-  const handle = await open(path, constants.O_RDONLY)
+  let handle: ReturnType<typeof open> extends Promise<infer T> ? T : never
+  try {
+    handle = await open(path, constants.O_RDONLY)
+  } catch (error) {
+    // hmdfs 等文件系统对祖先目录拒绝 open（多用户挂载根 /storage/Users 等，
+    // EPERM/EACCES）：平台策略阻止再向上同步——持久化边界到此为止，跳过
+    // 而非失败（同步是 best-effort 耐久性，非安全边界，#58/#71）。
+    if ((error as NodeJS.ErrnoException | null)?.code === 'EPERM' || (error as NodeJS.ErrnoException | null)?.code === 'EACCES') return
+    throw error
+  }
   try {
     await handle.sync()
   } finally {
@@ -154,13 +163,35 @@ export async function saveImageFile(root: string, input: SaveImageAttachment, li
     await handle.sync()
     await handle.close()
     handle = undefined
-    try {
-      await link(temporary, target)
-    } catch (error) {
-      /* v8 ignore next -- Private same-filesystem directories make EEXIST the only recoverable link race. */
-      if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) throw error
+    let published = false
+    const verifyDedup = async (): Promise<void> => {
       const existing = new Uint8Array(await readFile(target))
       if (digest(existing) !== sha256) throw new AttachmentError('Stored attachment failed integrity verification.', 'ATTACHMENT_CORRUPT')
+    }
+    try {
+      await link(temporary, target)
+      published = true
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException | null)?.code
+      if (code === 'EEXIST') {
+        /* v8 ignore next -- Private same-filesystem directories make EEXIST the only recoverable link race. */
+        await verifyDedup()
+      } else if (code === 'EPERM' || code === 'EACCES' || code === 'EXDEV' || code === 'ENOSYS') {
+        // hmdfs 无硬链接（PR-1/PR-10 同款可移植集）：回退 rename 发布；
+        // rename 撞 EEXIST 走同 dedup 校验，其余失败链原错误为 cause。
+        try {
+          await rename(temporary, target)
+          published = true
+        } catch (renameError: unknown) {
+          if ((renameError as NodeJS.ErrnoException | null)?.code === 'EEXIST') {
+            await verifyDedup()
+          } else {
+            throw new AttachmentError('Unable to persist image attachment.', 'ATTACHMENT_WRITE_FAILED', { cause: error })
+          }
+        }
+      } else {
+        throw error
+      }
     }
     // Persist the target entry and close a concurrent bucket-creation window
     // before the reference can reach a session checkpoint. The dedup path
@@ -168,7 +199,7 @@ export async function saveImageFile(root: string, input: SaveImageAttachment, li
     // that writer reaches its own durability boundary.
     await syncDirectory(bucket)
     await syncDirectory(join(root, 'objects'))
-    await unlink(temporary)
+    if (!published) await unlink(temporary)
   } catch (error) {
     /* v8 ignore next -- A descriptor can remain open only when the underlying write/sync/close operation fails. */
     if (handle !== undefined) await handle.close().catch(

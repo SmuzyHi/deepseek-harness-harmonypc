@@ -368,7 +368,8 @@ export function createProcessInspector(
   arch: NodeJS.Architecture = process.arch,
   internals: ProcessInspectorInternals = DEFAULT_INTERNALS,
 ): ProcessInspector {
-  if (platform === 'linux') return new LinuxProcessInspector(arch, internals)
+  // openharmony 提供 Linux 兼容的 /proc 与信号语义，归入 Linux 检查器（#52）。
+  if (platform === 'linux' || platform === ('openharmony' as NodeJS.Platform)) return new LinuxProcessInspector(arch, internals)
   if (platform === 'darwin') return new MacProcessInspector(internals)
   throw new Error(`subprocess-local: terminal inspection is unsupported on platform ${platform}`)
 }
