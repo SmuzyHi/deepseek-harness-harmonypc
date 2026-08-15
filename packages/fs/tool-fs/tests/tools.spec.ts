@@ -831,8 +831,7 @@ describe('sandbox escalation API (write/edit)', () => {
     expect(ctx.fs.sandboxMode).toBeUndefined()
     for (const name of ['write', 'edit'] as const) {
       const props = fsSchema(ctx, name).parameters.properties
-      expect(props['sandbox_permissions']).toBeUndefined()
-      expect(props['justification']).toBeUndefined()
+      expect(props['escalation']).toBeUndefined()
     }
   })
 
@@ -840,8 +839,9 @@ describe('sandbox escalation API (write/edit)', () => {
     const { ctx } = await setupConfining()
     for (const name of ['write', 'edit'] as const) {
       const props = fsSchema(ctx, name).parameters.properties
-      expect(props['sandbox_permissions']?.enum).toEqual(['workspace-write', 'danger-full-access'])
-      expect(props['justification']).toBeDefined()
+      const escalation = props['escalation'] as { properties?: { sandbox_permissions?: { enum?: string[] }; justification?: unknown } } | undefined
+      expect(escalation?.properties?.sandbox_permissions?.enum).toEqual(['workspace-write', 'danger-full-access'])
+      expect(escalation?.properties?.justification).toBeDefined()
     }
   })
 
@@ -863,7 +863,7 @@ describe('sandbox escalation API (write/edit)', () => {
     const result = await call(ctx, 'write', { file_path: 'a.txt', content: 'x' }, escalationAgent())
     expect(result.isError).toBe(true)
     expect(text(result)).toContain('[sandbox: file access denied under workspace-write mode]')
-    expect(text(result)).toContain('retry this exact operation once with sandbox_permissions')
+    expect(text(result)).toContain('retry this exact operation once with the atomic escalation object')
   })
 
   it('a non-FS_SANDBOX_DENIED provider error passes through unchanged', async () => {
@@ -883,7 +883,7 @@ describe('sandbox escalation API (write/edit)', () => {
     await ctx.tools.execute({
       callId: CallId('call-fs-esc-grant'),
       name: 'write',
-      arguments: { file_path: 'a.txt', content: 'x', sandbox_permissions: 'danger-full-access', justification: 'the test needs it' },
+      arguments: { file_path: 'a.txt', content: 'x', escalation: { sandbox_permissions: 'danger-full-access', justification: 'the test needs it' } },
       agent: escalationAgent() as never,
       signal: new AbortController().signal,
     })
@@ -893,7 +893,7 @@ describe('sandbox escalation API (write/edit)', () => {
   it('a rejected escalation fails closed with its own text and never mutates', async () => {
     const { ctx, fs } = await setupConfining({ approval: true })
     ctx.on('approval/request', () => Promise.resolve('rejected' as const))
-    const result = await call(ctx, 'edit', { file_path: 'a.txt', old_string: 'x', new_string: 'y', sandbox_permissions: 'danger-full-access', justification: 'the test needs it' }, escalationAgent())
+    const result = await call(ctx, 'edit', { file_path: 'a.txt', old_string: 'x', new_string: 'y', escalation: { sandbox_permissions: 'danger-full-access', justification: 'the test needs it' } }, escalationAgent())
     expect(result.isError).toBe(true)
     expect(text(result)).toContain('the user rejected escalating this operation to "danger-full-access"')
     expect(fs.stamped).toEqual([])
@@ -901,28 +901,33 @@ describe('sandbox escalation API (write/edit)', () => {
 
   it('escalation without an approval service fails closed', async () => {
     const { ctx } = await setupConfining()
-    const result = await call(ctx, 'write', { file_path: 'a.txt', content: 'x', sandbox_permissions: 'danger-full-access', justification: 'why' }, escalationAgent())
+    const result = await call(ctx, 'write', { file_path: 'a.txt', content: 'x', escalation: { sandbox_permissions: 'danger-full-access', justification: 'why' } }, escalationAgent())
     expect(result.isError).toBe(true)
     expect(text(result)).toContain('no approval service is composed')
   })
 
   it('escalation with an approval service but no agent fails closed', async () => {
     const { ctx } = await setupConfining({ approval: true })
-    const result = await call(ctx, 'write', { file_path: 'a.txt', content: 'x', sandbox_permissions: 'danger-full-access', justification: 'why' })
+    const result = await call(ctx, 'write', { file_path: 'a.txt', content: 'x', escalation: { sandbox_permissions: 'danger-full-access', justification: 'why' } })
     expect(result.isError).toBe(true)
     expect(text(result)).toContain('no agent to route it through')
   })
 
-  it('rejects the escalation argument pairing (one field without the other)', async () => {
+  it('rejects an incomplete atomic escalation object (missing justification or missing mode)', async () => {
     const { ctx } = await setupConfining()
-    const missing = await call(ctx, 'write', { file_path: 'a.txt', content: 'x', sandbox_permissions: 'workspace-write' }, escalationAgent())
-    expect(missing.isError).toBe(true)
-    expect(text(missing)).toContain('sandbox_permissions requires a justification')
+    // The escalated parameter schema enforces the pairing before execution (PR-13):
+    // a partial escalation object never reaches the runtime policy resolution.
+    const missingJustification = await call(ctx, 'write', { file_path: 'a.txt', content: 'x', escalation: { sandbox_permissions: 'workspace-write' } }, escalationAgent())
+    expect(missingJustification.isError).toBe(true)
+    expect(text(missingJustification)).toContain('missing required property "escalation.justification"')
+    const missingMode = await call(ctx, 'write', { file_path: 'a.txt', content: 'x', escalation: { justification: 'why' } }, escalationAgent())
+    expect(missingMode.isError).toBe(true)
+    expect(text(missingMode)).toContain('missing required property "escalation.sandbox_permissions"')
   })
 
-  it('sandbox_permissions under a non-confining backend fails closed (unadvertised field still reaches execute)', async () => {
+  it('escalation under a non-confining backend fails closed (unadvertised object still reaches execute)', async () => {
     const { ctx } = await setup()
-    const result = await call(ctx, 'write', { file_path: 'a.txt', content: 'x', sandbox_permissions: 'workspace-write', justification: 'why' }, escalationAgent())
+    const result = await call(ctx, 'write', { file_path: 'a.txt', content: 'x', escalation: { sandbox_permissions: 'workspace-write', justification: 'why' } }, escalationAgent())
     expect(result.isError).toBe(true)
     expect(text(result)).toContain('not available in this composition')
   })

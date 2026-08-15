@@ -41,21 +41,31 @@ export const WIDER_MODES: Record<string, readonly SandboxMode[]> = {
 export const ESCALATION_TARGETS: readonly SandboxMode[] = ['workspace-write', 'danger-full-access']
 
 /**
- * Validate the escalation argument pairing a tool schema cannot express:
- * `sandbox_permissions` and `justification` travel together — an approval
- * prompt without a reason, or a reason driving nothing, is a malformed ask —
- * and the justification must be a non-empty sentence.
- * @param sandboxPermissions - the raw `sandbox_permissions` argument, if given.
- * @param justification - the raw `justification` argument, if given.
+ * The model-facing escalation pair, carried as ONE atomic tool argument
+ * (PR-13 hishell): `sandbox_permissions` and `justification` travel together
+ * structurally — a schema cannot accept one without the other, so the
+ * runtime pairing check (and the "justification only valid together with
+ * sandbox_permissions" failure class) disappears entirely.
  */
-export function validateEscalationArgs(sandboxPermissions: string | undefined, justification: string | undefined): void {
-  if (sandboxPermissions !== undefined && justification === undefined) {
-    throw new Error('invalid escalation: sandbox_permissions requires a justification')
+export interface ToolEscalation {
+  /** The wider sandbox mode this call needs. */
+  sandbox_permissions: SandboxMode
+  /** One sentence for the user explaining why this exact call needs the wider access. */
+  justification: string
+}
+
+/**
+ * Validate one escalation ask: the justification must be a non-empty sentence
+ * (the pairing is schema-enforced by the atomic {@link ToolEscalation} object).
+ * @param escalation - the tool-facing escalation object, if given.
+ */
+export function validateEscalation(escalation: ToolEscalation | undefined): void {
+  if (escalation === undefined) return
+  // 原子对象内的两个字段都必须在场（模型侧可能发残缺 JSON——schema 之外运行时兜底）
+  if (typeof escalation.sandbox_permissions !== 'string' || escalation.sandbox_permissions.length === 0) {
+    throw new Error('invalid escalation: sandbox_permissions is required in the atomic escalation object')
   }
-  if (justification !== undefined && sandboxPermissions === undefined) {
-    throw new Error('invalid escalation: justification is only valid together with sandbox_permissions')
-  }
-  if (justification !== undefined && justification.trim().length === 0) {
+  if (typeof escalation.justification !== 'string' || escalation.justification.trim().length === 0) {
     throw new Error('invalid justification: expected a non-empty sentence')
   }
 }
@@ -82,7 +92,7 @@ export function sandboxDenialMarker(mode: SandboxMode): string {
  * @returns the hint line, exactly as the model sees it.
  */
 export function escalationHintMarker(subject: string): string {
-  return `[sandbox: escalation available — retry this exact ${subject} once with sandbox_permissions (the narrowest wider mode that suffices) + justification; the approval prompt asks the user]`
+  return `[sandbox: escalation available — retry this exact ${subject} once with the atomic escalation object (\`{ sandbox_permissions: <narrowest wider mode>, justification: <one sentence> }\`); the approval prompt asks the user]`
 }
 
 /**

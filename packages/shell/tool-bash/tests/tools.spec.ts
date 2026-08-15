@@ -294,8 +294,8 @@ describe('bash tool', () => {
 
   it('honors workdir', async () => {
     const ctx = await setup()
-    const result = await call(ctx, 'bash', { command: 'pwd', description: 'test command', workdir: '/tmp' })
-    expect(text(result).trim()).toMatch(/\/tmp$/)
+    const result = await call(ctx, 'bash', { command: 'pwd', description: 'test command', workdir: tmpdir() })
+    expect(text(result).trim()).toBe(tmpdir())
   })
 
   it('surfaces spawn failures as isError', async () => {
@@ -572,8 +572,10 @@ describe('sandbox escalation through the generic task producer', () => {
   const escalate = {
     command: 'true',
     description: 'test escalation',
-    sandbox_permissions: 'workspace-write',
-    justification: 'the command needs workspace writes',
+    escalation: {
+      sandbox_permissions: 'workspace-write',
+      justification: 'the command needs workspace writes',
+    },
   }
 
   it('fails load when a confining executor has no shared sandbox-policy resolver', async () => {
@@ -588,14 +590,14 @@ describe('sandbox escalation through the generic task producer', () => {
   it('advertises the sandbox fields and validates their pairing', async () => {
     const { ctx } = await setupSandboxed()
     const schema = ctx.tools.schemas().find(item => item.name === 'bash')!
-    const properties = schema.parameters.properties as Record<string, { enum?: string[] }>
-    expect(properties['sandbox_permissions']?.enum).toEqual(['workspace-write', 'danger-full-access'])
+    const properties = schema.parameters.properties as Record<string, { properties?: { sandbox_permissions?: { enum?: string[] } } }>
+    expect(properties['escalation']?.properties?.sandbox_permissions?.enum).toEqual(['workspace-write', 'danger-full-access'])
     expect(schema.description).toContain('approval prompt')
 
     for (const args of [
-      { command: 'true', description: 'd', sandbox_permissions: 'workspace-write' },
-      { command: 'true', description: 'd', justification: 'why' },
-      { command: 'true', description: 'd', sandbox_permissions: 'workspace-write', justification: ' ' },
+      { command: 'true', description: 'd', escalation: { sandbox_permissions: 'workspace-write' } },
+      { command: 'true', description: 'd', escalation: { justification: 'why' } },
+      { command: 'true', description: 'd', escalation: { sandbox_permissions: 'workspace-write', justification: ' ' } },
     ]) {
       expect((await call(ctx, 'bash', args)).isError).toBe(true)
     }
@@ -608,7 +610,7 @@ describe('sandbox escalation through the generic task producer', () => {
     const { ctx } = await setupSandboxed(true)
     const prompted = vi.fn()
     ctx.on('approval/request', () => { prompted(); return Promise.resolve<ApprovalOutcome>('allowed-once') })
-    const result = await call(ctx, 'bash', { ...escalate, sandbox_permissions: 'workspace-write' }, sandboxAgent('workspace-write'))
+    const result = await call(ctx, 'bash', { ...escalate, escalation: { sandbox_permissions: 'workspace-write', justification: 'wider still' } }, sandboxAgent('workspace-write'))
     expect(text(result)).toContain('not strictly wider')
     expect(prompted).not.toHaveBeenCalled()
 
@@ -689,7 +691,7 @@ describe('sandbox escalation through the generic task producer', () => {
     const agent = sandboxAgent('workspace-write')
     await call(ctx, 'bash', { command: 'true', description: 'ordinary' }, agent)
     ctx.on('approval/request', () => Promise.resolve<ApprovalOutcome>('allowed-once'))
-    await call(ctx, 'bash', { ...escalate, sandbox_permissions: 'danger-full-access' }, agent)
+    await call(ctx, 'bash', { ...escalate, escalation: { sandbox_permissions: 'danger-full-access', justification: 'wider still' } }, agent)
     expect(bash.modes).toEqual(['workspace-write', 'danger-full-access'])
   })
 
@@ -805,14 +807,14 @@ describe('session-cwd routing (per-session workdir)', () => {
 
   it('defaults bash to the agent\'s session cwd (not the server launch dir)', async () => {
     const ctx = await setup()
-    const result = await call(ctx, 'bash', { command: 'pwd', description: 'pwd' }, agentInCwd('/tmp'))
-    expect(text(result).trim()).toMatch(/\/tmp$/)
+    const result = await call(ctx, 'bash', { command: 'pwd', description: 'pwd' }, agentInCwd(tmpdir()))
+    expect(text(result).trim()).toBe(tmpdir())
   })
 
   it('an explicit absolute workdir overrides the session cwd', async () => {
     const ctx = await setup()
-    const result = await call(ctx, 'bash', { command: 'pwd', description: 'pwd', workdir: '/tmp' }, agentInCwd('/'))
-    expect(text(result).trim()).toMatch(/\/tmp$/)
+    const result = await call(ctx, 'bash', { command: 'pwd', description: 'pwd', workdir: tmpdir() }, agentInCwd('/'))
+    expect(text(result).trim()).toBe(tmpdir())
   })
 
   it('a relative workdir is resolved against the session cwd', async () => {
@@ -825,9 +827,9 @@ describe('session-cwd routing (per-session workdir)', () => {
   it('two sessions with different cwds each run bash in their own dir', async () => {
     const ctx = await setup()
     const inUsr = await call(ctx, 'bash', { command: 'pwd', description: 'pwd' }, agentInCwd('/usr'))
-    const inTmp = await call(ctx, 'bash', { command: 'pwd', description: 'pwd' }, agentInCwd('/tmp'))
+    const inTmp = await call(ctx, 'bash', { command: 'pwd', description: 'pwd' }, agentInCwd(tmpdir()))
     expect(text(inUsr).trim()).toMatch(/\/usr$/)
-    expect(text(inTmp).trim()).toMatch(/\/tmp$/)
+    expect(text(inTmp).trim()).toBe(tmpdir())
   })
 
   it('falls back to the executor default when the agent has no session cwd', async () => {

@@ -548,15 +548,17 @@ describe('sandbox escalation through ctx.approval', () => {
   const escalate = {
     command: 'Write-Output ok',
     description: 'test escalation',
-    sandbox_permissions: 'workspace-write',
-    justification: 'the command needs workspace writes',
+    escalation: {
+      sandbox_permissions: 'workspace-write',
+      justification: 'the command needs workspace writes',
+    },
   }
 
   it('advertises the sandbox fields, the escalation clause, and the confined-mode contracts', async () => {
     const { ctx } = await setupSandboxed()
     const schema = ctx.tools.schemas().find(item => item.name === 'pwsh')!
-    const properties = schema.parameters.properties as Record<string, { enum?: string[] }>
-    expect(properties['sandbox_permissions']?.enum).toEqual(['workspace-write', 'danger-full-access'])
+    const properties = schema.parameters.properties as Record<string, { properties?: { sandbox_permissions?: { enum?: string[] } } }>
+    expect(properties['escalation']?.properties?.sandbox_permissions?.enum).toEqual(['workspace-write', 'danger-full-access'])
     expect(schema.description).toContain('approval prompt')
     expect(schema.description).toContain('ConstrainedLanguage')
     expect(schema.description).toContain('workspace-write stays in FullLanguage')
@@ -564,9 +566,9 @@ describe('sandbox escalation through ctx.approval', () => {
     expect(schema.description).toContain('fails with EPERM')
 
     for (const args of [
-      { command: 'Write-Output ok', description: 'd', sandbox_permissions: 'workspace-write' },
-      { command: 'Write-Output ok', description: 'd', justification: 'why' },
-      { command: 'Write-Output ok', description: 'd', sandbox_permissions: 'workspace-write', justification: ' ' },
+      { command: 'Write-Output ok', description: 'd', escalation: { sandbox_permissions: 'workspace-write' } },
+      { command: 'Write-Output ok', description: 'd', escalation: { justification: 'why' } },
+      { command: 'Write-Output ok', description: 'd', escalation: { sandbox_permissions: 'workspace-write', justification: ' ' } },
     ]) {
       expect((await call(ctx, 'pwsh', args)).isError).toBe(true)
     }
@@ -577,8 +579,8 @@ describe('sandbox escalation through ctx.approval', () => {
     const schema = ctx.tools.schemas().find(item => item.name === 'pwsh')!
     expect(schema.description).not.toContain('ConstrainedLanguage')
     expect(schema.description).not.toContain('named pipes')
-    expect(schema.description).not.toContain('sandbox_permissions')
-    expect(schema.parameters.properties).not.toHaveProperty('sandbox_permissions')
+    expect(schema.description).not.toContain('escalation')
+    expect(schema.parameters.properties).not.toHaveProperty('escalation')
   })
 
   it('rejects injected escalation without a sandbox and non-widening escalation without prompting', async () => {
@@ -588,7 +590,7 @@ describe('sandbox escalation through ctx.approval', () => {
     const { ctx } = await setupSandboxed(true)
     const prompted = vi.fn()
     ctx.on('approval/request', () => { prompted(); return Promise.resolve<ApprovalOutcome>('allowed-once') })
-    const result = await call(ctx, 'pwsh', { ...escalate, sandbox_permissions: 'workspace-write' }, sandboxAgent('workspace-write'))
+    const result = await call(ctx, 'pwsh', { ...escalate, escalation: { sandbox_permissions: 'workspace-write', justification: 'wider still' } }, sandboxAgent('workspace-write'))
     expect(text(result)).toContain('not strictly wider')
     expect(prompted).not.toHaveBeenCalled()
 
@@ -669,7 +671,7 @@ describe('sandbox escalation through ctx.approval', () => {
     const agent = sandboxAgent('workspace-write')
     await call(ctx, 'pwsh', { command: 'Write-Output hi', description: 'ordinary' }, agent)
     ctx.on('approval/request', () => Promise.resolve<ApprovalOutcome>('allowed-once'))
-    await call(ctx, 'pwsh', { ...escalate, sandbox_permissions: 'danger-full-access' }, agent)
+    await call(ctx, 'pwsh', { ...escalate, escalation: { sandbox_permissions: 'danger-full-access', justification: 'wider still' } }, agent)
     expect(bash.modes).toEqual(['workspace-write', 'danger-full-access'])
   })
 
@@ -959,8 +961,8 @@ describe('renderPwshResult sandbox markers', () => {
     const denied = { ...base, sandbox: { mode: 'read-only' as const, denied: true } }
     expect(renderPwshResult(denied, ['workspace-write'])).toBe(
       'out\n[sandbox: file access denied under read-only mode]\n'
-      + '[sandbox: escalation available — retry this exact command once with sandbox_permissions '
-      + '(the narrowest wider mode that suffices) + justification; the approval prompt asks the user]',
+      + '[sandbox: escalation available — retry this exact command once with the atomic escalation object '
+      + '(`{ sandbox_permissions: <narrowest wider mode>, justification: <one sentence> }`); the approval prompt asks the user]',
     )
   })
 
@@ -1016,8 +1018,8 @@ describe('renderPwshProcessRead', () => {
       .toBe('x\n[sandbox: file access denied under read-only mode]')
     expect(renderPwshProcessRead({ delta: 'x', lossy: false }, { mode: 'read-only', denied: true }, ['workspace-write']))
       .toBe('x\n[sandbox: file access denied under read-only mode]\n'
-        + '[sandbox: escalation available — retry this exact command once with sandbox_permissions '
-        + '(the narrowest wider mode that suffices) + justification; the approval prompt asks the user]')
+        + '[sandbox: escalation available — retry this exact command once with the atomic escalation object '
+        + '(`{ sandbox_permissions: <narrowest wider mode>, justification: <one sentence> }`); the approval prompt asks the user]')
   })
 })
 

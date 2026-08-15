@@ -31,7 +31,7 @@ import type {} from '@deepseek-ai/dsh-jobs'
 import type {} from '@deepseek-ai/dsh-shell-env'
 import type {} from '@deepseek-ai/dsh-user-approval'
 import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
-import { ESCALATION_TARGETS, approveEscalation, validateEscalationArgs } from '@deepseek-ai/dsh-sandbox'
+import { ESCALATION_TARGETS, approveEscalation, validateEscalation, type ToolEscalation } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
 import type { ShellRunResult } from '@deepseek-ai/dsh-shell'
 import { parseExitStatus } from '@deepseek-ai/dsh-shell'
@@ -66,8 +66,7 @@ interface PwshToolArgs {
   timeoutMs?: number
   workdir?: string
   run_in_background?: boolean
-  sandbox_permissions?: string
-  justification?: string
+  escalation?: ToolEscalation
 }
 
 /** The canonical foreground result of one pwsh call (the `output.schema` value shape). */
@@ -96,7 +95,7 @@ function validatePwshArgs(args: PwshToolArgs): void {
   }
   // The escalation pairing (sandbox_permissions ⇔ justification, non-empty) is
   // the shared rule both enforcing families validate identically.
-  validateEscalationArgs(args.sandbox_permissions, args.justification)
+  validateEscalation(args.escalation)
 }
 /* jscpd:ignore-end */
 
@@ -134,10 +133,11 @@ function pwshDescription(backgroundEnabled: boolean, escalationModes: readonly S
     + 'Attempting a command the sandbox may deny is safe and expected: run it and read the '
     + 'marker rather than assuming the denial. When a command is denied and a wider mode would let it '
     + 'succeed, escalate immediately in the same turn — the one sanctioned exception to a denial: retry '
-    + 'the exact same command once with `sandbox_permissions` (the narrowest wider mode that suffices) '
-    + 'plus a one-sentence `justification`. Do not detour through chat to ask permission first — the '
-    + 'approval prompt raised by that retry is how the user consents. If the session states approval '
-    + 'prompts are disabled, there is no exception: a denial is final — do not set `sandbox_permissions`. '
+    + 'the exact same command once with the atomic `escalation` object — '
+    + '`{ sandbox_permissions: <narrowest wider mode>, justification: <one sentence> }`. Do not detour '
+    + 'through chat to ask permission first — the approval prompt raised by that retry is how the user '
+    + 'consents. If the session states approval prompts are disabled, there is no exception: a denial is '
+    + 'final — do not set `escalation`. '
     + 'Never escalate speculatively: ground the request in a real denial — normally the one this command '
     + 'just hit; escalating up front is fine only when this session already denied the same access. '
     + 'A rejected escalation is final for that command — stop and explain, never work around '
@@ -268,14 +268,23 @@ export function apply(ctx: Context, config: Config = {}): void {
         run_in_background: { type: 'boolean' as const, description: 'Run in the background and return a job id immediately (collect with job_output, stop with job_kill). No timeout applies.' },
       } : {},
       ...escalationModes.length > 0 ? {
-        sandbox_permissions: {
-          type: 'string' as const,
-          enum: [...escalationModes],
-          description: 'The wider sandbox mode this command needs. Only valid as a one-shot retry of a command the sandbox just denied; requires justification and user approval.',
-        },
-        justification: {
-          type: 'string' as const,
-          description: 'Required with sandbox_permissions: one sentence for the user explaining why this exact command needs the wider access.',
+        escalation: {
+          type: 'object' as const,
+          description: 'The atomic escalation ask (PR-13): the wider sandbox mode plus a one-sentence justification — schema-enforced to travel together. Only valid as a one-shot retry of a command the sandbox just denied; requires user approval.',
+          additionalProperties: false,
+          properties: {
+            sandbox_permissions: {
+              type: 'string' as const,
+              enum: [...escalationModes],
+              description: 'The wider sandbox mode this command needs.',
+              required: true,
+            },
+            justification: {
+              type: 'string' as const,
+              description: 'One sentence for the user explaining why this exact command needs the wider access.',
+              required: true,
+            },
+          },
         },
       } : {},
     },
@@ -349,8 +358,8 @@ export function apply(ctx: Context, config: Config = {}): void {
       validatePwshArgs(args)
       // Description is display metadata; workdir defaults to the caller's session.
       const standingPolicy = resolveSandboxPolicy(exec)
-      const approvedMode = args.sandbox_permissions !== undefined && args.justification !== undefined
-        ? await approvePwshEscalation(args.sandbox_permissions, args.justification, exec, standingPolicy)
+      const approvedMode = args.escalation !== undefined
+        ? await approvePwshEscalation(args.escalation.sandbox_permissions, args.escalation.justification, exec, standingPolicy)
         : undefined
       const policy = approvedMode === undefined
         ? standingPolicy

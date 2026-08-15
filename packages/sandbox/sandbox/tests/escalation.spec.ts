@@ -13,7 +13,7 @@ import {
   approveEscalation,
   escalationHintMarker,
   sandboxDenialMarker,
-  validateEscalationArgs,
+  validateEscalation,
 } from '@deepseek-ai/dsh-sandbox'
 import type { EscalationApprover, EscalationOutcome } from '@deepseek-ai/dsh-sandbox'
 
@@ -29,16 +29,14 @@ describe('the strictly-wider ladder', () => {
   })
 })
 
-describe('validateEscalationArgs', () => {
-  it('accepts neither field, or both with a non-empty justification', () => {
-    expect(() => { validateEscalationArgs(undefined, undefined) }).not.toThrow()
-    expect(() => { validateEscalationArgs('workspace-write', 'because the workspace needs it') }).not.toThrow()
+describe('validateEscalation', () => {
+  it('accepts absent or a complete atomic escalation with a non-empty justification', () => {
+    expect(() => { validateEscalation(undefined) }).not.toThrow()
+    expect(() => { validateEscalation({ sandbox_permissions: 'workspace-write', justification: 'because the workspace needs it' }) }).not.toThrow()
   })
 
-  it('rejects one field without the other, and a blank justification', () => {
-    expect(() => { validateEscalationArgs('workspace-write', undefined) }).toThrow(/requires a justification/)
-    expect(() => { validateEscalationArgs(undefined, 'orphan reason') }).toThrow(/only valid together with sandbox_permissions/)
-    expect(() => { validateEscalationArgs('workspace-write', '   ') }).toThrow(/non-empty sentence/)
+  it('rejects a blank justification (the pairing is schema-enforced by the atomic object, PR-13)', () => {
+    expect(() => { validateEscalation({ sandbox_permissions: 'workspace-write', justification: '   ' }) }).toThrow(/non-empty sentence/)
   })
 })
 
@@ -49,8 +47,8 @@ describe('the model-facing markers', () => {
   })
 
   it('the hint marker names the family subject', () => {
-    expect(escalationHintMarker('command')).toContain('retry this exact command once with sandbox_permissions')
-    expect(escalationHintMarker('operation')).toContain('retry this exact operation once with sandbox_permissions')
+    expect(escalationHintMarker('command')).toContain('retry this exact command once with the atomic escalation object')
+    expect(escalationHintMarker('operation')).toContain('retry this exact operation once with the atomic escalation object')
   })
 })
 

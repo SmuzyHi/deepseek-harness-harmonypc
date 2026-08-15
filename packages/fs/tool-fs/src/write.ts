@@ -14,6 +14,7 @@ import type {} from '@deepseek-ai/dsh-system-prompt'
 import { computeHunkDiffs, diffsFromMeta } from './diff.ts'
 import { remediateFsError } from './error.ts'
 import { sessionResolveOptions } from './session-cwd.ts'
+import type { ToolEscalation } from '@deepseek-ai/dsh-sandbox'
 import type { FsSandboxController } from './sandbox.ts'
 
 /**
@@ -50,8 +51,7 @@ ${verb} file
 interface WriteToolArgs {
   file_path: string
   content: string
-  sandbox_permissions?: string
-  justification?: string
+  escalation?: ToolEscalation
 }
 
 /**

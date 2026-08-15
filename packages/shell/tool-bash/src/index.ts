@@ -10,6 +10,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
+import { statSync } from 'node:fs'
 import { isAbsolute, resolve as resolvePath } from 'node:path'
 import { defineTool, TOOL_ABORTED } from '@deepseek-ai/dsh-tools'
 import type { GenericCallView, TerminalCallView, ToolExecution, ToolResult, ToolResultView } from '@deepseek-ai/dsh-tools'
@@ -20,7 +21,7 @@ import type {} from '@deepseek-ai/dsh-jobs'
 import type {} from '@deepseek-ai/dsh-user-approval'
 import type {} from '@deepseek-ai/dsh-shell-env'
 import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
-import { ESCALATION_TARGETS, approveEscalation, canonicalPath, validateEscalationArgs } from '@deepseek-ai/dsh-sandbox'
+import { ESCALATION_TARGETS, approveEscalation, canonicalPath, validateEscalation, type ToolEscalation } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
 import { DSH_ENV_PREFIX } from '@deepseek-ai/dsh-shell'
 import type { ShellRunResult } from '@deepseek-ai/dsh-shell'
@@ -48,8 +49,8 @@ interface BashToolArgs {
   timeoutMs?: number
   workdir?: string
   run_in_background?: boolean
-  sandbox_permissions?: string
-  justification?: string
+  /** 原子提权对象（PR-13）：sandbox_permissions 与 justification 成对（schema 结构性保证）。 */
+  escalation?: ToolEscalation
 }
 
 function validateBashArgs(args: BashToolArgs): void {
@@ -62,9 +63,9 @@ function validateBashArgs(args: BashToolArgs): void {
   if (args.timeoutMs !== undefined && (!Number.isFinite(args.timeoutMs) || args.timeoutMs <= 0)) {
     throw new Error(`invalid timeoutMs: expected a positive number, got ${JSON.stringify(args.timeoutMs)}`)
   }
-  // The escalation pairing (sandbox_permissions ⇔ justification, non-empty) is
-  // the shared rule both enforcing families validate identically.
-  validateEscalationArgs(args.sandbox_permissions, args.justification)
+  // The escalation object (PR-13) is schema-atomic; runtime only checks the
+  // justification is a non-empty sentence (the shared rule both families use).
+  validateEscalation(args.escalation)
 }
 
 function bashDescription(backgroundEnabled: boolean, escalationModes: readonly SandboxMode[]): string {
@@ -82,10 +83,11 @@ function bashDescription(backgroundEnabled: boolean, escalationModes: readonly S
   return base + ' Attempting a command the sandbox may deny is safe and expected: run it and read the '
     + 'marker rather than assuming the denial. When a command is denied and a wider mode would let it '
     + 'succeed, escalate immediately in the same turn — the one sanctioned exception to a denial: retry '
-    + 'the exact same command once with `sandbox_permissions` (the narrowest wider mode that suffices) '
-    + 'plus a one-sentence `justification`. Do not detour through chat to ask permission first — the '
-    + 'approval prompt raised by that retry is how the user consents. If the session states approval '
-    + 'prompts are disabled, there is no exception: a denial is final — do not set `sandbox_permissions`. '
+    + 'the exact same command once with the atomic `escalation` object — '
+    + '`{ sandbox_permissions: <narrowest wider mode>, justification: <one sentence> }`. Do not detour '
+    + 'through chat to ask permission first — the approval prompt raised by that retry is how the user '
+    + 'consents. If the session states approval prompts are disabled, there is no exception: a denial is '
+    + 'final — do not set `escalation`. '
     + 'Never escalate speculatively: ground the request in a real denial — normally the one this command '
     + 'just hit; escalating up front is fine only when this session already denied the same access. '
     + 'A rejected escalation is final for that command — stop and explain, never work around '
@@ -145,12 +147,30 @@ function resolveWorkdir(
   modelWorkdir: string | undefined,
   exec: { agent?: Agent },
   policyWorkspaceRoot?: string,
+  warn?: (message: string) => void,
 ): string | undefined {
   const headerCwd = exec.agent?.session.header.cwd
   const sessionCwd = policyWorkspaceRoot ?? (headerCwd === undefined ? undefined : canonicalPath(headerCwd))
-  if (modelWorkdir === undefined) return sessionCwd
+  // PR-8（hishell）：会话 cwd 可能指向已删除目录（getcwd 残留污染，实测新 shell
+  // 报 `getcwd: cannot access parent directories`）——校验有效，失效回退到
+  // session workspace（policyWorkspaceRoot）或 process.cwd() 并告警一次。
+  const usableSessionCwd = (): string | undefined => {
+    if (sessionCwd === undefined) return sessionCwd
+    let isDirectory = false
+    try {
+      isDirectory = statSync(sessionCwd).isDirectory()
+    } catch {
+      // 缺失/不可访问（getcwd 残留污染：指向已删除目录）→ 走回退
+    }
+    if (isDirectory) return sessionCwd
+    const fallback = policyWorkspaceRoot ?? process.cwd()
+    warn?.(`[dsh-bash] session cwd 失效（${sessionCwd}，可能已删除），回退到 ${fallback}`)
+    return fallback
+  }
+  if (modelWorkdir === undefined) return usableSessionCwd()
   if (sessionCwd !== undefined && !isAbsolute(modelWorkdir)) {
-    return resolvePath(sessionCwd, modelWorkdir)
+    const base = usableSessionCwd()
+    return resolvePath(base ?? process.cwd(), modelWorkdir)
   }
   return modelWorkdir
 }
@@ -257,14 +277,23 @@ export function apply(ctx: Context, config: Config = {}): void {
         run_in_background: { type: 'boolean' as const, description: 'Run in the background and return a job id immediately (collect with job_output, stop with job_kill). No timeout applies.' },
       } : {},
       ...escalationModes.length > 0 ? {
-        sandbox_permissions: {
-          type: 'string' as const,
-          enum: [...escalationModes],
-          description: 'The wider sandbox mode this command needs. Only valid as a one-shot retry of a command the sandbox just denied; requires justification and user approval.',
-        },
-        justification: {
-          type: 'string' as const,
-          description: 'Required with sandbox_permissions: one sentence for the user explaining why this exact command needs the wider access.',
+        escalation: {
+          type: 'object' as const,
+          description: 'The atomic escalation ask (PR-13): the wider sandbox mode plus a one-sentence justification — schema-enforced to travel together. Only valid as a one-shot retry of a command the sandbox just denied; requires user approval.',
+          additionalProperties: false,
+          properties: {
+            sandbox_permissions: {
+              type: 'string' as const,
+              enum: [...escalationModes],
+              description: 'The wider sandbox mode this command needs.',
+              required: true,
+            },
+            justification: {
+              type: 'string' as const,
+              description: 'One sentence for the user explaining why this exact command needs the wider access.',
+              required: true,
+            },
+          },
         },
       } : {},
     },
@@ -331,13 +360,13 @@ export function apply(ctx: Context, config: Config = {}): void {
       validateBashArgs(args)
       // Description is display metadata; workdir defaults to the caller's session.
       const standingPolicy = resolveSandboxPolicy(exec)
-      const approvedMode = args.sandbox_permissions !== undefined && args.justification !== undefined
-        ? await approveBashEscalation(args.sandbox_permissions, args.justification, exec, standingPolicy)
+      const approvedMode = args.escalation !== undefined
+        ? await approveBashEscalation(args.escalation.sandbox_permissions, args.escalation.justification, exec, standingPolicy)
         : undefined
       const policy = approvedMode === undefined
         ? standingPolicy
         : { ...(standingPolicy as SandboxExecutionPolicy), mode: approvedMode }
-      const workdir = resolveWorkdir(args.workdir, exec, standingPolicy?.workspaceRoot)
+      const workdir = resolveWorkdir(args.workdir, exec, standingPolicy?.workspaceRoot, message => ctx.logger.warn(message))
       const dshEnv = ctx.shellEnv.collect(exec)
       const request = {
         command: args.command,

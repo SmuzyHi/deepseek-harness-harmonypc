@@ -13,20 +13,26 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { ToolExecution } from '@deepseek-ai/dsh-tools'
 import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
-import { ESCALATION_TARGETS, approveEscalation, escalationHintMarker, sandboxDenialMarker, validateEscalationArgs } from '@deepseek-ai/dsh-sandbox'
+import { ESCALATION_TARGETS, approveEscalation, escalationHintMarker, sandboxDenialMarker, validateEscalation, type ToolEscalation } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
 import { FsError } from '@deepseek-ai/dsh-fs'
 
-/** The two escalation arguments a mutating tool may carry (advertised only under a confining backend). */
+/** The atomic escalation ask a mutating tool may carry (PR-13; advertised only under a confining backend). */
 export interface FsEscalationArgs {
-  sandbox_permissions?: string
-  justification?: string
+  escalation?: ToolEscalation
 }
 
-/** The schema fields for the escalation arguments, spread into a tool's `parameters` when a confining backend is mounted. */
+/** The schema field for the atomic escalation object, spread into a tool's `parameters` when a confining backend is mounted. */
 export interface EscalationSchemaFields {
-  sandbox_permissions: { type: 'string'; enum: string[]; description: string }
-  justification: { type: 'string'; description: string }
+  escalation: {
+    type: 'object'
+    additionalProperties: false
+    properties: {
+      sandbox_permissions: { type: 'string'; enum: string[]; description: string; required: true }
+      justification: { type: 'string'; description: string; required: true }
+    }
+    description: string
+  }
 }
 
 /**
@@ -58,16 +64,23 @@ export class FsSandboxController {
    */
   schemaFields(): EscalationSchemaFields {
     return {
-      sandbox_permissions: {
-        type: 'string',
-        enum: [...this.escalationModes],
-        description: 'The wider sandbox mode this file operation needs. Only valid as a one-shot retry '
-          + 'of an operation the sandbox just denied; requires justification and user approval.',
-      },
-      justification: {
-        type: 'string',
-        description: 'Required with sandbox_permissions: one sentence for the user explaining '
-          + 'why this exact file operation needs the wider access.',
+      escalation: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          sandbox_permissions: {
+            type: 'string',
+            enum: [...this.escalationModes],
+            description: 'The wider sandbox mode this file operation needs.',
+            required: true,
+          },
+          justification: {
+            type: 'string',
+            description: 'One sentence for the user explaining why this exact file operation needs the wider access.',
+            required: true,
+          },
+        },
+        description: 'The atomic escalation ask (PR-13): the wider sandbox mode plus a one-sentence justification — schema-enforced to travel together. Only valid as a one-shot retry of an operation the sandbox just denied; requires user approval.',
       },
     }
   }
@@ -85,9 +98,9 @@ export class FsSandboxController {
    *   unsandboxed backend.
    */
   async resolvePolicy(toolName: string, args: FsEscalationArgs, exec: ToolExecution): Promise<SandboxExecutionPolicy | undefined> {
-    validateEscalationArgs(args.sandbox_permissions, args.justification)
+    validateEscalation(args.escalation)
     const standingPolicy = this.policy?.resolve({ ...exec.agent ? { session: exec.agent.session } : {} })
-    if (args.sandbox_permissions === undefined || args.justification === undefined) {
+    if (args.escalation === undefined) {
       return standingPolicy
     }
     if (this.escalationModes.length === 0) {
@@ -95,7 +108,7 @@ export class FsSandboxController {
     }
     const policy = standingPolicy as SandboxExecutionPolicy
     const approvedMode = await approveEscalation(
-      { requestedMode: args.sandbox_permissions, justification: args.justification, effectiveMode: policy.mode, subject: 'operation' },
+      { requestedMode: args.escalation.sandbox_permissions, justification: args.escalation.justification, effectiveMode: policy.mode, subject: 'operation' },
       {
         approver: this.ctx.get('approval'),
         agent: exec.agent,

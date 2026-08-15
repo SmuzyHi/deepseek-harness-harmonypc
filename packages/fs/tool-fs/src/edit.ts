@@ -13,6 +13,7 @@ import type {} from '@deepseek-ai/dsh-system-prompt'
 import { computeHunkDiffs, diffsFromMeta } from './diff.ts'
 import { remediateFsError } from './error.ts'
 import { sessionResolveOptions } from './session-cwd.ts'
+import type { ToolEscalation } from '@deepseek-ai/dsh-sandbox'
 import type { FsSandboxController } from './sandbox.ts'
 
 /** Validated `edit` arguments after defaulting. */
@@ -33,8 +34,7 @@ interface EditToolArgs {
   old_string: string
   new_string: string
   replace_all?: boolean
-  sandbox_permissions?: string
-  justification?: string
+  escalation?: ToolEscalation
 }
 
 /**
