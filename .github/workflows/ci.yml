@@ -21,3 +21,11 @@ jobs:
       - run: pnpm install --no-frozen-lockfile
       - run: pnpm run build
       - run: pnpm run test
+      - name: public word gate
+        run: |
+          # 铁律门禁：公网树禁 Gitea/Remia/Smuzy/Huawei 字样。
+          # 豁免（#91 政策依据）：仅 INSTALL.md 可含安装入口 URL（仓 URL 必需类，
+          # 用户明示「全走 atomgit/npmmirror」）——README 等其他文件零豁免。
+          hits=$(git grep -nE '[Gg]itea|[Rr]emia|[Ss]muzy|[Hh]uawei' -- '*.md' '*.ts' '*.json' '*.yml' '*.yaml' ':!INSTALL.md' || true)
+          if [ -n "$hits" ]; then echo "$hits"; echo 'PUBLIC-WORD-GATE FAIL'; exit 1; fi
+          echo 'PUBLIC-WORD-GATE OK'
