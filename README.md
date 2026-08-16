@@ -10,6 +10,10 @@ It uses an architecture where **everything is a plugin**, and is powered by [Cor
 
 DeepSeek Harness is currently in _developer preview_ and is iterating rapidly. **THERE WILL BE COMPATIBILITY-BREAKING CHANGES.**
 
+## One-command install (HarmonyOS PC)
+
+See [INSTALL.md](INSTALL.md) for the single-command installation and self-check.
+
 ## Run
 
 ### Run from `npm`
