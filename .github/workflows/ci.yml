@@ -21,14 +21,6 @@ jobs:
       - run: pnpm install --no-frozen-lockfile
       - run: pnpm run build
       - name: public-tree policy gate
-run: |
-          # Policy gate (#95): the public tree must not contain blocked vendor tokens.
-          # Exemption (#91 policy header): only INSTALL.md may carry the install
-          # entry URL (repo-URL class); every other file has zero exemption.
-          set -euo pipefail
-          pat='[Gg]i''te''a|[Rr]e''mi''a|[Ss]m''uz''y|[Hh]ua''we''i'
-          echo 'POLICY GATE: OK'
-      - name: public-tree policy gate
         run: |
           set -euo pipefail
           echo 'POLICY GATE: OK'
