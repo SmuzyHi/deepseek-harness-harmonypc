@@ -5,10 +5,6 @@ import { tmpdir } from 'node:os'
 import { dirname, join, parse, resolve } from 'node:path'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-
-// hmdfs 上 chmod 600/700 无效（文件恒 660、目录恒 770）：openharmony 的
-// 精确 mode 断言降级为 owner 读写位保留（#49 同口径）。
-const modeMask = process.platform === ('openharmony' as string) ? 0o700 : 0o777
 import sharp from 'sharp'
 import type { ImageAttachmentLimits } from '@deepseek-ai/dsh-attachment'
 import { readImageFile, saveImageFile } from '../src/store.ts'
@@ -132,8 +128,8 @@ describe('local attachment store', () => {
     expect(second.attachmentId).toBe(first.attachmentId)
     expect(new Uint8Array(await readFile(object))).toEqual(PNG)
     if (process.platform !== 'win32') {
-      expect((await stat(object)).mode & modeMask).toBe(0o600)
-      expect((await stat(join(storageRoot, 'objects', sha256.slice(0, 2)))).mode & modeMask).toBe(0o700)
+      expect((await stat(object)).mode & 0o777).toBe(0o600)
+      expect((await stat(join(storageRoot, 'objects', sha256.slice(0, 2)))).mode & 0o777).toBe(0o700)
     }
     await expect(readImageFile(storageRoot, first)).resolves.toEqual({ ref: first, data: PNG })
   })
