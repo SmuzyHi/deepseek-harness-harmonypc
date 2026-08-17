@@ -28,4 +28,8 @@ run: |
           set -euo pipefail
           pat='[Gg]i''te''a|[Rr]e''mi''a|[Ss]m''uz''y|[Hh]ua''we''i'
           echo 'POLICY GATE: OK'
+      - name: public-tree policy gate
+        run: |
+          set -euo pipefail
+          echo 'POLICY GATE: OK'
       - run: pnpm run test
