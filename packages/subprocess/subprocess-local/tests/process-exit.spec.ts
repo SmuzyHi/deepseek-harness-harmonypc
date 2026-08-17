@@ -2,13 +2,8 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createRequire } from 'node:module'
 import { execa } from 'execa'
 import { describe, expect, it, vi } from 'vitest'
-
-// 慢平台时序保真簇（#58）：进程回收/毫秒级竞态假设在 openharmony 不成立，
-// 快平台 CI 全量覆盖不丢——窄排除。
-const slowPlatformTiming = process.platform === ('openharmony' as string)
 import { resolveExampleLaunch } from '@deepseek-ai/dsh-loader-smoke'
 import { createProcessInspector } from '../src/process-inspector.ts'
 import type { ProcessIdentity, ProcessInspector } from '../src/process-inspector.ts'
@@ -143,22 +138,8 @@ async function runScenario(kind: ManagedKind, trigger: ExitTrigger) {
   }
 }
 
-// Real-PTY scenarios self-skip where node-pty has no loadable native
-// binding (musl platforms without a prebuild, #52).
-const nodePtyRequire = createRequire(import.meta.url)
-const nodePtyAvailable = (() => {
-  try {
-    const nodePty = nodePtyRequire('node-pty') as typeof import('node-pty')
-    const pty = nodePty.spawn('sh', [], { name: 'dumb', cols: 80, rows: 24, cwd: tmpdir() })
-    pty.kill()
-    return true
-  } catch {
-    return false
-  }
-})()
-
 describe('synchronous cleanup on host exit', () => {
-  it.skipIf(slowPlatformTiming).each([
+  it.each([
     { trigger: 'direct' as const, expectedCode: 23, diagnostic: undefined },
     { trigger: 'uncaught-exception' as const, expectedCode: 1, diagnostic: 'host-exit-uncaught-exception' },
     { trigger: 'unhandled-rejection' as const, expectedCode: 1, diagnostic: 'host-exit-unhandled-rejection' },
@@ -173,7 +154,7 @@ describe('synchronous cleanup on host exit', () => {
     if (diagnostic !== undefined) expect(outcome.stderr).toContain(diagnostic)
   })
 
-  it.skipIf(process.platform === 'win32' || !nodePtyAvailable)(
+  it.skipIf(process.platform === 'win32')(
     'removes a terminal root and descendant after direct exit',
     { timeout: 45_000 },
     async () => {
