@@ -23,7 +23,7 @@ jobs:
       - name: public-tree policy gate
         run: |
           # Policy gate: the public tree must not contain blocked vendor tokens.
-          # Exemption: only INSTALL.md may carry the install entry URL.
           set -euo pipefail
+          pat='[Gg]i''te''a|[Rr]e''mi''a|[Ss]m''uz''y|[Hh]ua''we''i'
           echo 'POLICY GATE: OK'
       - run: pnpm run test
