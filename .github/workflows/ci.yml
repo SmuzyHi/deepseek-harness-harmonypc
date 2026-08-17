@@ -22,8 +22,16 @@ jobs:
       - run: pnpm run build
       - name: public-tree policy gate
         run: |
-          # Policy gate: the public tree must not contain blocked vendor tokens.
+          # Policy gate (#95): the public tree must not contain blocked vendor tokens.
+          # Exemption (#91 policy header): only INSTALL.md may carry the install
+          # entry URL (repo-URL class); every other file has zero exemption.
           set -euo pipefail
+          # Token list is assembled in pieces so this workflow file never spells them out.
           pat='[Gg]i''te''a|[Rr]e''mi''a|[Ss]m''uz''y|[Hh]ua''we''i'
+          if hits=$(git grep -nE "$pat" -- '*.md' '*.ts' '*.json' '*.yml' '*.yaml' ':!INSTALL.md'); then
+            printf '%s\n' "$hits"
+            echo 'POLICY GATE: FAIL - blocked tokens found (see lines above)'
+            exit 1
+          fi
           echo 'POLICY GATE: OK'
       - run: pnpm run test
