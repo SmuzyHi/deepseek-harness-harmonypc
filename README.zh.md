@@ -12,14 +12,7 @@ DeepSeek Harness 目前处于 _开发者预览_ 阶段，正在快速迭代。**
 
 ## 一键安装（鸿蒙 PC）
 
-在鸿蒙 PC（openharmony / musl / hmdfs）上，一条命令安装并自检 `dsh`：
-
-```sh
-curl -fsSL "https://atomgit.com/api/v5/repos/Smuzy/hishell-bootstrap/raw/install-dsh.sh" | sh
-```
-
-安装器会自举 musl node 运行时，经 npmmirror 源安装官方 `@deepseek-ai/dsh` 包，应用 `hishell-v*` 发布线的平台适配，并执行自检（web 冒烟 + 会话落盘回归）。需要完整 agent 环境请使用 bootstrap 入口。
-
+参见 [INSTALL.md](INSTALL.md) 获取一键安装与自检说明。
 ## 运行
 
 ### 通过 `npm` 运行
